@@ -63,6 +63,13 @@
     "./components/QRCodeModal": "./src/components/QRCodeModal.tsx",
     "./components/ImageBoundary": "./src/components/ImageBoundary.tsx"
   },
+  "dependencies": {
+    "@radix-ui/react-dialog": "^1.1.15",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.6"
+  },
   "peerDependencies": {
     "@phosphor-icons/react": "^2.1.10",
     "react": "^19.2.4"

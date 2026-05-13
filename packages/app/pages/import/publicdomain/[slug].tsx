@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import PublicDomainImportPage from '@/components/pages/PublicDomainImportPage';
 import { isServer } from '@pantry-host/shared/env';
 
+/** See pages/import/mealdb/[idMeal].tsx for why <main id="stage"> is
+ *  rendered here synchronously. */
 export default function PublicDomainImportRoute() {
   const [slug, setSlug] = useState<string | null>(null);
   useEffect(() => {
@@ -9,7 +11,11 @@ export default function PublicDomainImportRoute() {
     const match = window.location.pathname.match(/^\/import\/publicdomain\/([^/?#]+)/);
     setSlug(match ? decodeURIComponent(match[1]) : '');
   }, []);
-  if (slug === null) return null;
-  if (!slug) return <div className="max-w-3xl mx-auto py-12 px-4">Missing recipe slug.</div>;
-  return <PublicDomainImportPage slug={slug} />;
+  return (
+    <main id="stage" className="max-sm:min-h-screen">
+      {slug === null ? null
+        : !slug ? <div className="max-w-3xl mx-auto py-12 px-4">Missing recipe slug.</div>
+        : <PublicDomainImportPage slug={slug} />}
+    </main>
+  );
 }

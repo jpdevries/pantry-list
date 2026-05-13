@@ -117,6 +117,9 @@ export default function MealdbImportPage({ idMeal }: Props) {
         <title>Import Recipe | Pantry Host</title>
         <meta name="description" content="Preview a recipe from TheMealDB before importing into your Pantry Host." />
       </Head>
+      {/* #stage anchor is rendered by the route wrapper at
+          pages/import/mealdb/[idMeal].tsx so it exists in the DOM
+          before idMeal parses — see the comment there. */}
       <ImportPreview
         state={state}
         sourceLabel="TheMealDB"

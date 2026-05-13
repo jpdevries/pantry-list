@@ -1,6 +1,13 @@
 #!/bin/bash
 set -e
 
+# Run from the repo root regardless of how the script is invoked.
+# Cloudflare Workers Builds runs build commands from the package
+# directory in monorepos (despite the dashboard's "Path: /" setting),
+# so without this cd `packages/marketing/...` path lookups below — and
+# the `cd packages/marketing` near the end — would all break.
+cd "$(git rev-parse --show-toplevel)"
+
 # Conditional LFS fetch + R2 sync for Cloudflare Workers deploy.
 #
 # Videos are served from R2 (not from the build output), so we only

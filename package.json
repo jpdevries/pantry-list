@@ -12,6 +12,8 @@
     "dev:marketing": "npm run dev -w packages/marketing",
     "dev:web": "npm run dev -w packages/web",
     "dev:mcp": "npm run dev -w packages/mcp",
+    "dev:graphql-rs": "cd packages/server && cargo run",
+    "build:graphql-rs": "cd packages/server && cargo build --release",
     "test:smoke": "npx tsx witness/run-smoke.ts",
     "screencasts": "npx tsx witness/screencasts/generate-all.ts"
   },

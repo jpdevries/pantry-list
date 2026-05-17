@@ -1,0 +1,37 @@
+[package]
+name = "pantry-server"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT"
+description = "Rust GraphQL backend for Pantry Host (IoT-targeted phase-2 rewrite)"
+
+[[bin]]
+name = "pantry-server"
+path = "src/main.rs"
+
+[dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net"] }
+tower-http = { version = "0.6", features = ["cors"] }
+async-graphql = { version = "7", default-features = false, features = ["chrono"] }
+async-graphql-axum = "7"
+rusqlite = { version = "0.31", features = ["bundled", "uuid", "serde_json"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.24"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+anyhow = "1"
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+# Optimize for size — this binary ships to Pi 3-class devices.
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"

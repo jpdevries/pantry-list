@@ -15,6 +15,7 @@ mod config;
 mod db;
 mod error;
 mod graphql;
+mod image;
 mod models;
 mod routes;
 

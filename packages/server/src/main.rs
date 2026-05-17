@@ -16,6 +16,10 @@ mod db;
 mod error;
 mod graphql;
 mod image;
+#[allow(dead_code)]
+mod ingredient_parse;
+#[allow(dead_code)]
+mod iso_duration;
 mod models;
 mod routes;
 

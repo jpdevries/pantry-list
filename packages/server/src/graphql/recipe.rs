@@ -793,13 +793,104 @@ impl RecipeMutation {
         })
     }
 
-    /// AI recipe generation is a phase 2.x follow-up; the Anthropic SDK call
-    /// isn't ported to Rust yet. Return a recognizable error so clients can
-    /// fall back to the Node graphql-server during the transition.
-    async fn generate_recipes(&self, _ctx: &Context<'_>) -> async_graphql::Result<Vec<Recipe>> {
-        Err(async_graphql::Error::new(
-            "generateRecipes is not implemented in the Rust backend yet. \
-             Run the Node graphql-server for AI recipe generation.",
-        ))
+    /// Generate three recipes from the current pantry + cookware via the
+    /// Anthropic Messages API and persist them as `source = "ai-generated"`.
+    /// Requires `AI_API_KEY` (or `ANTHROPIC_API_KEY`) on the server.
+    async fn generate_recipes(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<Recipe>> {
+        let pool = ctx.data::<Pool>()?;
+        let config = ctx.data::<ServerConfig>()?;
+        let http = ctx.data::<reqwest::Client>()?;
+        let api_key = config.anthropic_api_key.clone().ok_or_else(|| {
+            async_graphql::Error::new(
+                "AI_API_KEY not set on the Rust GraphQL server — set the env var \
+                 or use the Node graphql-server.",
+            )
+        })?;
+        let uploads_dir = config.uploads_dir.clone();
+
+        // 1. Snapshot pantry + cookware on a blocking thread.
+        let (ingredients, cookware) = db::with_conn(pool, |conn| {
+            let mut i_stmt = conn.prepare("SELECT * FROM ingredients ORDER BY name")?;
+            let ingredients: Vec<crate::models::IngredientRow> = i_stmt
+                .query_map([], crate::models::IngredientRow::from_row)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            let mut c_stmt = conn.prepare("SELECT * FROM cookware ORDER BY name")?;
+            let cookware: Vec<CookwareRow> = c_stmt
+                .query_map([], CookwareRow::from_row)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok((ingredients, cookware))
+        })
+        .await?;
+
+        // 2. Ask Anthropic — this is the only async-network step.
+        let prompt = crate::anthropic::build_recipe_prompt(&ingredients, &cookware);
+        let generated = crate::anthropic::generate_recipes(http, &api_key, &prompt)
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
+        // 3. Insert each generated recipe back on a blocking thread, mapping
+        //    `requiredCookware` names to ids using the snapshot we just read.
+        let name_to_id: HashMap<String, String> = cookware
+            .iter()
+            .map(|c| (c.name.clone(), c.id.clone()))
+            .collect();
+
+        let rows = db::with_conn(pool, move |conn| {
+            let home_kitchen_id = resolve_kitchen_id(conn, None)?;
+            let mut out = Vec::with_capacity(generated.len());
+            for r in generated {
+                let cw_ids: Vec<String> = r
+                    .required_cookware
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|n| name_to_id.get(&n).cloned())
+                    .collect();
+                let ings: Vec<RecipeIngredientInput> = r
+                    .ingredients
+                    .into_iter()
+                    .map(|i| RecipeIngredientInput {
+                        ingredient_name: i.ingredient_name,
+                        quantity: i.quantity,
+                        unit: i.unit,
+                        item_size: i.item_size,
+                        item_size_unit: i.item_size_unit,
+                        source_recipe_id: None,
+                    })
+                    .collect();
+                let row = insert_recipe(
+                    conn,
+                    &r.title,
+                    r.description.as_deref(),
+                    &r.instructions,
+                    r.servings.map(|n| n as i64),
+                    r.prep_time.map(|n| n as i64),
+                    r.cook_time.map(|n| n as i64),
+                    r.tags.as_deref(),
+                    Some(&cw_ids),
+                    "ai-generated",
+                    None,
+                    None,
+                    None,
+                    &home_kitchen_id,
+                    ings,
+                )?;
+                out.push(row);
+            }
+            Ok(out)
+        })
+        .await?;
+
+        // 4. Schedule friendly-slug copies (no-op when photo_url is None,
+        //    which is the common case for AI-generated recipes — but keeps
+        //    the helper in one place if a future model emits photoUrl).
+        for row in &rows {
+            schedule_friendly_photo_copy(
+                row.photo_url.as_deref(),
+                row.slug.as_deref(),
+                uploads_dir.clone(),
+            );
+        }
+
+        Ok(rows.into_iter().map(Recipe::from).collect())
     }
 }

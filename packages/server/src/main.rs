@@ -11,6 +11,7 @@ use axum::{
 };
 use tower_http::cors::{Any, CorsLayer};
 
+mod anthropic;
 mod config;
 mod db;
 mod error;

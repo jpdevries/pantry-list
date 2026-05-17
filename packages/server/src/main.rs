@@ -11,16 +11,26 @@ use axum::{
 };
 use tower_http::cors::{Any, CorsLayer};
 
+mod config;
 mod db;
 mod error;
 mod graphql;
 mod models;
+mod routes;
 
+use crate::config::ServerConfig;
+use crate::db::Pool;
 use crate::graphql::{build_schema, AppSchema};
 
+/// Shared state for axum routes. The GraphQL schema already has the pool +
+/// http client + config in its `.data()` slot; the same handles live here so
+/// the non-GraphQL routes (`/upload`, `/fetch-recipe`) can read them too.
 #[derive(Clone)]
-struct AppState {
-    schema: AppSchema,
+pub struct AppState {
+    pub schema: AppSchema,
+    pub pool: Pool,
+    pub http: reqwest::Client,
+    pub config: ServerConfig,
 }
 
 #[tokio::main]
@@ -41,8 +51,28 @@ async fn main() -> anyhow::Result<()> {
     let pool = db::init(&db_path)?;
     tracing::info!("SQLite database ready at {db_path}");
 
-    let schema = build_schema(pool);
-    let state = AppState { schema };
+    let config = ServerConfig::from_env();
+    if let Err(e) = std::fs::create_dir_all(&config.uploads_dir) {
+        tracing::warn!(
+            "could not create uploads dir {}: {e} (continuing; /upload will retry)",
+            config.uploads_dir.display()
+        );
+    }
+
+    // Single shared reqwest client: connection pool, DNS cache, rustls roots
+    // are all amortized across `/fetch-recipe` and the Anthropic resolver.
+    let http = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (compatible; PantryListBot/1.0)")
+        .timeout(std::time::Duration::from_secs(15))
+        .build()?;
+
+    let schema = build_schema(pool.clone(), http.clone(), config.clone());
+    let state = AppState {
+        schema,
+        pool,
+        http,
+        config,
+    };
 
     // The Node graphql-server.ts accepts POST on the root path for GraphQL and
     // serves multiple other endpoints on the same port. Mirror that surface so
@@ -55,8 +85,8 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/", post(graphql_handler))
         .route("/graphql", post(graphql_handler))
-        .route("/upload", post(not_implemented_upload))
-        .route("/fetch-recipe", post(not_implemented_fetch_recipe))
+        .route("/upload", post(routes::upload::handle))
+        .route("/fetch-recipe", post(routes::fetch_recipe::handle))
         .layer(cors)
         .with_state(Arc::new(state));
 
@@ -76,24 +106,6 @@ async fn graphql_handler(
     req: GraphQLRequest,
 ) -> GraphQLResponse {
     state.schema.execute(req.into_inner()).await.into()
-}
-
-// Phase 2 ports only the GraphQL surface. These endpoints stay on the Node
-// graphql-server.ts until a follow-up phase ports image processing + recipe
-// URL scraping. Return a recognizable 501 so clients fail loudly during the
-// transition.
-async fn not_implemented_upload() -> impl IntoResponse {
-    let body = serde_json::json!({
-        "error": "/upload is not implemented in the Rust backend yet. Run the Node graphql-server for image uploads."
-    });
-    (axum::http::StatusCode::NOT_IMPLEMENTED, Json(body))
-}
-
-async fn not_implemented_fetch_recipe() -> impl IntoResponse {
-    let body = serde_json::json!({
-        "error": "/fetch-recipe is not implemented in the Rust backend yet. Run the Node graphql-server for recipe URL imports."
-    });
-    (axum::http::StatusCode::NOT_IMPLEMENTED, Json(body))
 }
 
 async fn shutdown_signal() {
@@ -119,4 +131,12 @@ async fn shutdown_signal() {
         _ = terminate => {},
     }
     tracing::info!("shutting down");
+}
+
+#[allow(dead_code)]
+async fn not_implemented(msg: &'static str) -> impl IntoResponse {
+    (
+        axum::http::StatusCode::NOT_IMPLEMENTED,
+        Json(serde_json::json!({ "error": msg })),
+    )
 }

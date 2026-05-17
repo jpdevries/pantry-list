@@ -1,5 +1,6 @@
 use async_graphql::{EmptySubscription, MergedObject, Schema};
 
+use crate::config::ServerConfig;
 use crate::db::Pool;
 
 mod cookware;
@@ -37,8 +38,14 @@ pub struct MutationRoot(
 
 pub type AppSchema = Schema<QueryRoot, MutationRoot, EmptySubscription>;
 
-pub fn build_schema(pool: Pool) -> AppSchema {
+pub fn build_schema(
+    pool: Pool,
+    http: reqwest::Client,
+    config: ServerConfig,
+) -> AppSchema {
     Schema::build(QueryRoot::default(), MutationRoot::default(), EmptySubscription)
         .data(pool)
+        .data(http)
+        .data(config)
         .finish()
 }

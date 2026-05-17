@@ -11,8 +11,8 @@ name = "pantry-server"
 path = "src/main.rs"
 
 [dependencies]
-axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "multipart"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "fs", "sync"] }
 tower-http = { version = "0.6", features = ["cors"] }
 async-graphql = { version = "7", default-features = false, features = ["chrono"] }
 async-graphql-axum = "7"
@@ -27,6 +27,15 @@ anyhow = "1"
 thiserror = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Recipe URL scraping + Anthropic API client. rustls-tls avoids the system
+# OpenSSL dependency that complicates cross-compilation for Pi.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+# Recipe HTML/JSON-LD parsing. Pulled in for /fetch-recipe — matches the
+# regex-heavy approach the Node graphql-server uses.
+regex = "1"
+# Image variant generation for /upload. WebP encoding goes through the pure-Rust
+# image-webp crate (enabled by the `webp` feature), so no native libs are needed.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
 
 [profile.release]
 # Optimize for size — this binary ships to Pi 3-class devices.

@@ -119,9 +119,12 @@ async fn main() -> anyhow::Result<()> {
         .layer(cors)
         .with_state(Arc::new(state));
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    // Bind IPv6 unspecified so we accept both v4 and v6 (IPV6_V6ONLY is off
+    // by default on Linux). Without this, mDNS clients that resolve our
+    // `.local` name to an AAAA record get ERR_ADDRESS_UNREACHABLE.
+    let addr = SocketAddr::from(([0u16; 8], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    tracing::info!("GraphQL API ready at http://0.0.0.0:{port}/graphql");
+    tracing::info!("GraphQL API ready at http://[::]:{port}/graphql");
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())

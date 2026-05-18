@@ -202,7 +202,12 @@ fn find_page<'a>(manifest: &'a Manifest, path: &str) -> Option<&'a RoutePage> {
         .find(|p| match_pattern(&p.segments, &url_segs))
 }
 
-fn shell_html(manifest: &Manifest, page_js: &str, default_palette: Option<&str>) -> String {
+fn shell_html(
+    manifest: &Manifest,
+    page_js: &str,
+    default_palette: Option<&str>,
+    trust_lan: bool,
+) -> String {
     let css_links: String = manifest
         .global_css
         .iter()
@@ -222,6 +227,14 @@ fn shell_html(manifest: &Manifest, page_js: &str, default_palette: Option<&str>)
             )
         })
         .unwrap_or_default();
+    // `trust-lan` opts every LAN visitor into owner-mode (Add/Edit/Delete/etc.)
+    // — see `isOwner()` in packages/app/lib/isTrustedNetwork.ts. Default off;
+    // the Pi deployment sets `PANTRY_TRUST_LAN=true` because it's single-user.
+    let trust_lan_meta = if trust_lan {
+        "<meta name=\"trust-lan\" content=\"true\">"
+    } else {
+        ""
+    };
     // The theme-init inline script is a near-verbatim copy of the one in
     // packages/app/pages/_document.tsx: applies localStorage-backed theme
     // pre-paint to avoid a flash of unstyled content.
@@ -242,6 +255,7 @@ fn shell_html(manifest: &Manifest, page_js: &str, default_palette: Option<&str>)
 <meta name="apple-mobile-web-app-title" content="Pantry Host">
 <meta name="build-hash" content="{build_hash}">
 {palette_meta}
+{trust_lan_meta}
 {css_links}
 <title>Pantry Host</title>
 </head>
@@ -255,6 +269,7 @@ fn shell_html(manifest: &Manifest, page_js: &str, default_palette: Option<&str>)
 </html>"##,
         build_hash = html_escape_attr(&manifest.build_hash),
         palette_meta = palette_meta,
+        trust_lan_meta = trust_lan_meta,
         css_links = css_links,
         app_script = html_escape_attr(&manifest.app_script),
         page_js = html_escape_attr(page_js),
@@ -349,7 +364,10 @@ pub async fn serve_spa(uri: Uri) -> Response {
         .unwrap_or("");
 
     let default_palette = std::env::var("DEFAULT_THEME").ok();
-    let html = shell_html(manifest, page_js, default_palette.as_deref());
+    let trust_lan = std::env::var("PANTRY_TRUST_LAN")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false);
+    let html = shell_html(manifest, page_js, default_palette.as_deref(), trust_lan);
     (
         StatusCode::OK,
         [(header::CONTENT_TYPE, HeaderValue::from_static("text/html; charset=utf-8"))],

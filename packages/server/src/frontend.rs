@@ -408,14 +408,22 @@ fn lookup_row(
     let conn = pool.get().map_err(|e| {
         rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
     })?;
-    // Both `recipes` and `menus` share (title, description, photo_url) at
-    // the row level. Recipes always have a photo_url column populated when
-    // the user uploaded one; menus don't — they typically borrow the first
-    // recipe's photo, but that's a client-side concern. We expose whatever
-    // is on the row.
+    // Recipes have their own photo_url column. Menus don't — the schema
+    // doesn't carry one — so we LEFT JOIN to menu_recipes -> recipes and
+    // pick the first linked recipe's photo. Same fallback the Node
+    // packages/app/pages/menus/[slug].tsx did via
+    //   'query($id:String!){menu(id:$id){title description recipes{photoUrl}}}'
+    // ⊕ `initialPhoto = recipes[0]?.photoUrl`.
     let sql = match table {
         "recipes" => "SELECT title, description, photo_url FROM recipes WHERE slug = ?1",
-        "menus" => "SELECT title, description, photo_url FROM menus WHERE slug = ?1",
+        "menus" => {
+            "SELECT m.title, m.description, \
+                    (SELECT r.photo_url FROM recipes r \
+                       JOIN menu_recipes mr ON mr.recipe_id = r.id \
+                       WHERE mr.menu_id = m.id AND r.photo_url IS NOT NULL \
+                       ORDER BY mr.sort_order LIMIT 1) AS photo_url \
+             FROM menus m WHERE m.slug = ?1"
+        }
         _ => return Ok(None),
     };
     let mut stmt = conn.prepare(sql)?;

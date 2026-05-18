@@ -3,9 +3,10 @@ use std::sync::Arc;
 
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse};
 use axum::{
-    extract::State,
-    http::Method,
-    routing::post,
+    extract::{Path as AxumPath, State},
+    http::{header, HeaderValue, Method, StatusCode},
+    response::{IntoResponse, Response},
+    routing::{get, post},
     Router,
 };
 use tower_http::cors::{Any, CorsLayer};
@@ -14,6 +15,7 @@ mod anthropic;
 mod config;
 mod db;
 mod error;
+mod frontend;
 mod graphql;
 mod image;
 mod ingredient_parse;
@@ -87,10 +89,33 @@ async fn main() -> anyhow::Result<()> {
         .allow_headers(Any);
 
     let app = Router::new()
-        .route("/", post(graphql_handler))
+        // GraphQL: POST on `/` and `/graphql`. GET on `/` falls through to
+        // the SPA shell handler below.
+        .route("/", post(graphql_handler).get(frontend::serve_spa))
         .route("/graphql", post(graphql_handler))
         .route("/upload", post(routes::upload::handle))
         .route("/fetch-recipe", post(routes::fetch_recipe::handle))
+        // Side endpoints that the SPA used to call as Next-style /api/*
+        // routes. Now that the frontend is static, they live here.
+        .route("/api/settings-read", get(routes::settings::settings_read))
+        .route("/api/settings-write", post(routes::settings::settings_write))
+        .route("/api/recipe-api-key", get(routes::settings::recipe_api_key))
+        .route("/api/plu", get(routes::plu::handle))
+        .route("/api/lookup-barcode", get(routes::lookup_barcode::handle))
+        .route("/api/recipe-ics", get(routes::recipe_ics::handle))
+        .route("/api/wikibooks", get(routes::wikibooks::handle))
+        // Aliases that already had Rust-side homes — keep the old URLs
+        // working too so the client doesn't need to change paths.
+        .route("/api/upload", post(routes::upload::handle))
+        .route("/api/fetch-recipe", post(routes::fetch_recipe::handle))
+        .route("/api/graphql", post(graphql_handler))
+        // Frontend assets: chunked JS/CSS at /_rex/static/<file>, uploaded
+        // images served from disk, and a catch-all GET that returns either
+        // an embedded public asset (sw.js, favicon, manifest.json…) or the
+        // SPA shell with the page bundle that matches the URL.
+        .route("/_rex/static/{*path}", get(frontend::serve_client))
+        .route("/uploads/{*path}", get(serve_upload))
+        .fallback(frontend::serve_spa)
         .layer(cors)
         .with_state(Arc::new(state));
 
@@ -110,6 +135,38 @@ async fn graphql_handler(
     req: GraphQLRequest,
 ) -> GraphQLResponse {
     state.schema.execute(req.into_inner()).await.into()
+}
+
+/// `GET /uploads/{*path}` — serve user-uploaded images from
+/// `state.config.uploads_dir`. Mirrors what Rex did with `public/uploads/`
+/// on the Node side. Uploaded files have UUID filenames and are immutable,
+/// so a long `Cache-Control` is safe.
+async fn serve_upload(
+    State(state): State<Arc<AppState>>,
+    AxumPath(path): AxumPath<String>,
+) -> Response {
+    // Reject any path that tries to climb out of the uploads dir. The
+    // axum extractor already URL-decodes path segments; do a final string
+    // check to be safe against percent-encoded `..`.
+    if path.contains("..") || path.starts_with('/') {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let full = state.config.uploads_dir.join(&path);
+    match tokio::fs::read(&full).await {
+        Ok(bytes) => {
+            let mime = mime_guess::from_path(&full).first_or_octet_stream();
+            let mut res = (StatusCode::OK, bytes).into_response();
+            if let Ok(ct) = HeaderValue::from_str(mime.as_ref()) {
+                res.headers_mut().insert(header::CONTENT_TYPE, ct);
+            }
+            res.headers_mut().insert(
+                header::CACHE_CONTROL,
+                HeaderValue::from_static("public, max-age=31536000, immutable"),
+            );
+            res
+        }
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 async fn shutdown_signal() {

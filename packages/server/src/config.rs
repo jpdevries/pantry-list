@@ -27,6 +27,23 @@ pub struct ServerConfig {
     /// 1 GB box. Default = 1; override with `IMAGE_CONCURRENCY` on bigger
     /// hosts.
     pub image_semaphore: Arc<Semaphore>,
+    /// JSON file where /api/settings-write persists user overrides. Layered
+    /// on top of process.env by /api/settings-read so Settings-page edits
+    /// take effect without a server restart. Default sits next to the
+    /// SQLite DB so all per-host state lives in the same directory.
+    pub overrides_path: PathBuf,
+    /// recipe-api.com key. Owner-gated read via /api/recipe-api-key.
+    pub recipe_api_key: Option<String>,
+    /// Cache dir for the Wikibooks dataset download. Default sits next to
+    /// the SQLite DB. Override with `CACHE_DIR`.
+    pub cache_dir: PathBuf,
+    /// Override the Open Food Facts API base URL. Used by the integration
+    /// test harness to point the barcode lookup at a local mock. Empty =
+    /// use the real `https://world.openfoodfacts.org`.
+    pub off_base_url: Option<String>,
+    /// Override the Hugging Face datasets-server base URL. Same pattern as
+    /// `off_base_url` — empty = use the real `datasets-server.huggingface.co`.
+    pub wikibooks_base_url: Option<String>,
 }
 
 impl ServerConfig {
@@ -51,12 +68,43 @@ impl ServerConfig {
             .and_then(|v| v.parse().ok())
             .filter(|&n: &usize| n > 0)
             .unwrap_or(1);
+        // Both .settings-overrides.json and the wikibooks cache default next
+        // to the SQLite DB so a Pi user can wipe one directory to factory-
+        // reset every per-host artifact.
+        let db_dir = std::env::var("SQLITE_DB_PATH")
+            .ok()
+            .map(PathBuf::from)
+            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| PathBuf::from("."));
+        let overrides_path = std::env::var("OVERRIDES_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| db_dir.join(".settings-overrides.json"));
+        let recipe_api_key = std::env::var("RECIPE_API_KEY")
+            .ok()
+            .filter(|s| !s.is_empty());
+        let cache_dir = std::env::var("CACHE_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| db_dir.join(".cache"));
+        let off_base_url = std::env::var("OFF_BASE_URL")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.trim_end_matches('/').to_string());
+        let wikibooks_base_url = std::env::var("WIKIBOOKS_BASE_URL")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.trim_end_matches('/').to_string());
         Self {
             uploads_dir,
             image_processing,
             anthropic_api_key,
             anthropic_base_url,
             image_semaphore: Arc::new(Semaphore::new(image_concurrency)),
+            overrides_path,
+            recipe_api_key,
+            cache_dir,
+            off_base_url,
+            wikibooks_base_url,
         }
     }
 }

@@ -1,9 +1,9 @@
-# @pantry-host/server — Rust GraphQL backend
+# @pantry-host/server — Rust GraphQL backend + embedded SPA
 
 IoT-targeted Rust rewrite of `packages/app/graphql-server.ts`. Drop-in
 replacement for the GraphQL endpoint that the React app, web PWA, and MCP
-server talk to — *plus* the three side endpoints that live on the same
-port:
+server talk to — *plus* the side endpoints that live on the same port
+*plus* the React frontend itself, baked into the binary:
 
 - `POST /upload` — multipart image upload + UUID rename + background
   variant pipeline (3 widths × {WebP, JPEG q80, grayscale JPEG q80},
@@ -16,6 +16,11 @@ port:
   against the cookware table.
 - `generateRecipes` GraphQL mutation — direct HTTP call to the Anthropic
   Messages API (no SDK). Requires `AI_API_KEY` or `ANTHROPIC_API_KEY`.
+- `GET /` (and any other GET that isn't an API path) — serves the Rex-built
+  React app as a pure-client SPA. Per-page JS chunks live under
+  `/_rex/static/`, uploaded images at `/uploads/`, and the HTML shell is
+  generated per request from Rex's build manifest. See **Embedded
+  frontend** below.
 
 ## Stack
 
@@ -43,10 +48,101 @@ The repo-root convenience scripts:
 ```bash
 npm run dev:graphql-rs       # cargo run from packages/server
 npm run build:graphql-rs     # cargo build --release
+npm run sync-frontend        # rebuild + mirror packages/app -> static/
 npm run build:pi             # cross-compile + Pi image for armv6/v7/arm64
+                             # (re-syncs the frontend by default)
 ```
 
 Or use the `graphql-server-rs` launch config in `.claude/launch.json`.
+
+## Embedded frontend
+
+The release binary contains the Rex-built React app baked in, so the Pi
+just runs `pantry-server` and gets the full UI on `http://<host>:4001/`.
+
+What's bundled:
+
+| URL prefix          | Source                                          | Embedded? |
+|---------------------|-------------------------------------------------|-----------|
+| `GET /`             | HTML shell generated per request from manifest  | yes       |
+| `GET /<any-page>`   | Same shell, but with the page bundle that matches the URL pattern (`/recipes/:slug`, `/at/*path`, …) | yes |
+| `/_rex/static/<f>`  | `packages/app/.rex/build/client/<f>` (JS + CSS) | yes       |
+| `/favicon.ico`, `/manifest.json`, `/sw.js`, `/icon-*.png`, `/pear.png` | `packages/app/public/<f>` | yes |
+| `/uploads/<f>`      | `$UPLOADS_DIR/<f>` (user-uploaded images)       | no — disk |
+
+The frontend lives in `packages/server/static/` (gitignored except for the
+`.gitkeep` placeholders); `rust-embed` picks it up at compile time. A
+`build.rs` walks the dir and emits `cargo:rerun-if-changed` for every file
+so editing the SPA invalidates the Rust binary cache.
+
+### Rebuilding the frontend
+
+```bash
+npm run sync-frontend -- --build         # rex build then mirror -> static/
+cargo build --release -p pantry-server   # bake the new SPA into the binary
+```
+
+`npm run build:pi` runs the same `--build` mirror step once up front before
+the per-target cross-compiles, so an Pi release picks up the latest SPA
+automatically. Pass `--skip-frontend` to reuse what's already in `static/`
+(handy when iterating on Rust-only changes).
+
+### How the SPA boots
+
+The server reads `static/client/manifest.json` (produced by `rex build`),
+matches the request URL against the `pages` table (Rex's `:param` and
+`*splat` patterns), and emits an HTML shell that loads:
+
+1. `_app-<hash>.js` — sets `window.__REX_APP__`
+2. `<page>-<hash>.js` — sets `window.__REX_PAGES[path]` and calls
+   `hydrateRoot(#__rex, …)`
+
+Module scripts execute in source order, so `_app` runs before the page
+bundle and `__REX_APP__` is defined by the time hydration starts. There's
+no server-side render — the `<div id="__rex">` ships empty and the page
+bundle paints client-side.
+
+This means `getServerSideProps` pages (e.g. `/recipes/:slug`) lose their
+pre-rendered OG metadata. The page itself falls back to a client-side
+fetch via `window.location.pathname`, so the recipe still loads — just
+without SEO-friendly `<meta property="og:*">` tags. Acceptable trade-off
+for a self-hosted home app; revisit if/when we care about Bluesky link
+previews.
+
+### `/api/*` parity
+
+The Node `packages/app` shipped 10 Next.js-style API routes under
+`/api/*`. All ten are now served by the Rust binary on the same paths
+so the static SPA's `fetch('/api/...')` calls work unmodified:
+
+| Route                  | Rust handler                            | Notes |
+|------------------------|-----------------------------------------|-------|
+| `POST /api/graphql`    | `graphql_handler` (alias of `/graphql`) | |
+| `POST /api/upload`     | `routes::upload::handle` (alias)        | |
+| `POST /api/fetch-recipe` | `routes::fetch_recipe::handle` (alias)| |
+| `GET /api/settings-read` | `routes::settings::settings_read`     | Owner-gated; secrets masked unless `?reveal=KEY` |
+| `POST /api/settings-write` | `routes::settings::settings_write`  | JSON or form-encoded; persists to `config.overrides_path` |
+| `GET /api/recipe-api-key` | `routes::settings::recipe_api_key`   | Owner-gated reveal of `RECIPE_API_KEY` |
+| `GET /api/plu`         | `routes::plu::handle`                   | IFPS dataset embedded via `include_str!`; same shape as `feed.pantryhost.app/api/plu` |
+| `GET /api/lookup-barcode` | `routes::lookup_barcode::handle`     | Open Food Facts proxy with allowlisted `ProductMeta` |
+| `GET /api/recipe-ics`  | `routes::recipe_ics::handle`            | Reads recipe + ingredients + cookware from SQLite, emits RFC 5545 calendar |
+| `GET /api/wikibooks`   | `routes::wikibooks::handle`             | On first call, downloads ~3,900-entry HF dataset to `config.cache_dir`; subsequent requests serve from in-memory + disk cache |
+
+"Owner" = request whose `Host` header is loopback (`localhost`,
+`127.0.0.1`, `::1`) **or** whose `X-Forwarded-Proto` is `https` (covers
+Tailscale-cert and mkcert setups). LAN guests on plain HTTP see masked
+secrets on settings-read and a 403 on settings-write. Same threat model
+as the Node version; spoofable `Host` isn't worse than what shipped
+before, but a hardened deployment would want a real reverse-proxy auth
+layer.
+
+### New env vars (introduced by the port)
+
+| Env var | Default | Notes |
+|---|---|---|
+| `OVERRIDES_PATH` | `<dirname(SQLITE_DB_PATH)>/.settings-overrides.json` | Settings-page edits persist here, layered on top of `process.env` at read time. |
+| `RECIPE_API_KEY` | unset | Read by `/api/recipe-api-key` and surfaced in `/api/settings-read`. Owner-only. |
+| `CACHE_DIR` | `<dirname(SQLITE_DB_PATH)>/.cache` | Disk-cache location for the Wikibooks dataset. |
 
 ## Pi cross-builds (`scripts/build-pi.sh`)
 
@@ -184,6 +280,9 @@ and images are tagged `pantry-server:pi-{armv6,armv7,arm64}`.
 | `IMAGE_PROCESSING` / `ENABLE_IMAGE_PROCESSING` | `true` | Set to `false`/`0` to skip variant generation (saves disk on Pi) |
 | `IMAGE_CONCURRENCY` | `1` | Concurrent variant pipelines. Bump on amd64 hosts with more RAM |
 | `AI_API_KEY` (or `ANTHROPIC_API_KEY`) | unset | Required for the `generateRecipes` mutation; otherwise it errors with a clear message |
+| `OVERRIDES_PATH` | `<dirname(SQLITE_DB_PATH)>/.settings-overrides.json` | Where /api/settings-write persists overrides |
+| `RECIPE_API_KEY` | unset | Surfaced by /api/recipe-api-key when the caller is an owner |
+| `CACHE_DIR` | `<dirname(SQLITE_DB_PATH)>/.cache` | Disk cache for the Wikibooks dataset download |
 
 ## Schema source of truth
 
@@ -204,9 +303,15 @@ option stays on the table; revisit if profiling shows it matters.
 ## File layout
 
 ```
+build.rs                  # emits cargo:rerun-if-changed for everything
+                          # under static/ so rust-embed picks up SPA
+                          # edits without manual cache invalidation.
 src/
-├── main.rs               # axum server, AppState, graceful shutdown
-├── config.rs             # ServerConfig (uploads dir, AI key, image semaphore)
+├── main.rs               # axum server, AppState, graceful shutdown,
+│                         # /uploads/* file serving
+├── frontend.rs           # rust-embed + per-request HTML shell generator
+├── config.rs             # ServerConfig (uploads dir, AI key, image semaphore,
+│                         # overrides path, cache dir, recipe-api key)
 ├── db.rs                 # rusqlite pool, schema apply, ID + timestamp helpers
 ├── error.rs              # AppError stub for future contextual errors
 ├── models.rs             # rusqlite Row → struct conversions per table
@@ -217,7 +322,14 @@ src/
 ├── anthropic.rs          # Messages API client + prompt builder
 ├── routes/
 │   ├── upload.rs         # POST /upload — multipart + variant kickoff
-│   └── fetch_recipe.rs   # POST /fetch-recipe — fetch + extract + cookware
+│   ├── fetch_recipe.rs   # POST /fetch-recipe — fetch + extract + cookware
+│   ├── settings.rs       # /api/settings-read, /api/settings-write,
+│   │                     # /api/recipe-api-key (shared auth helper)
+│   ├── plu.rs            # /api/plu — IFPS lookup (embedded JSON)
+│   ├── lookup_barcode.rs # /api/lookup-barcode — Open Food Facts proxy
+│   │                     # + ProductMeta allowlist
+│   ├── recipe_ics.rs     # /api/recipe-ics — RFC 5545 calendar export
+│   └── wikibooks.rs      # /api/wikibooks — HF dataset proxy + cache
 └── graphql/
     ├── mod.rs            # MergedObject roots
     ├── sql_helpers.rs    # kitchen lookup, slug uniqueness, sub-recipe linking
@@ -226,4 +338,8 @@ src/
     ├── recipe.rs         # Recipe + RecipeIngredient + queries + mutations
     ├── cookware.rs       # Cookware type + queries + mutations
     └── menu.rs           # Menu + MenuRecipe + queries + mutations
+static/                   # gitignored except for .gitkeep — populated by
+                          # scripts/sync-frontend.sh and baked in at compile
+├── client/               # rex build output (JS + CSS + manifest.json)
+└── public/               # subset of packages/app/public (favicon, sw.js, …)
 ```

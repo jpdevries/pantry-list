@@ -15,6 +15,7 @@ REPO_ROOT="$(cd "$SERVER_DIR/../.." && pwd)"
 ENV_BUILD="$SCRIPT_DIR/.env.build"
 DOCKERFILE="$SCRIPT_DIR/pi.dockerfile"
 DIST_DIR="$SERVER_DIR/dist/pi"
+SYNC_FRONTEND="$SCRIPT_DIR/sync-frontend.sh"
 
 # target_key -> "<rust target>|<docker platform>|<base verify image>"
 #
@@ -32,6 +33,10 @@ DO_BUILD=1
 DO_IMAGE=1
 DO_VERIFY=1
 DO_INTEGRATION=0
+# 1: run `npm run build` + sync-frontend.sh before cargo cross-compile so the
+# binary has the latest SPA embedded. Set with --skip-frontend when iterating
+# on Rust-only changes and the static/ dir is already populated.
+DO_FRONTEND=1
 REQUESTED=()
 
 usage() {
@@ -43,6 +48,8 @@ Options:
   --no-build      Skip cargo cross-compile (use existing target/release/<triple>/pantry-server)
   --no-image      Skip docker build
   --no-verify     Skip the boot smoke check
+  --skip-frontend Skip the frontend rebuild + sync (use whatever's in
+                  packages/server/static/ from a previous run)
   --integration   After verify, run npm run test:integration against the built image
                   (slow under QEMU for foreign archs; native arm hosts are fine)
   -h, --help      Show this help
@@ -54,6 +61,7 @@ while [[ $# -gt 0 ]]; do
     --no-build)    DO_BUILD=0 ;;
     --no-image)    DO_IMAGE=0; DO_VERIFY=0; DO_INTEGRATION=0 ;;
     --no-verify)   DO_VERIFY=0 ;;
+    --skip-frontend) DO_FRONTEND=0 ;;
     --integration) DO_INTEGRATION=1 ;;
     -h|--help)     usage; exit 0 ;;
     -*)            echo "unknown flag: $1" >&2; usage; exit 2 ;;
@@ -110,6 +118,13 @@ if [[ -n "${GHCR_PAT:-}" && -n "${GHCR_USER:-}" ]]; then
 fi
 
 mkdir -p "$DIST_DIR"
+
+# Run the frontend build + sync once, up front: every per-target cargo build
+# embeds the same static/ tree (it's the same SPA on armv6/armv7/arm64).
+if (( DO_BUILD && DO_FRONTEND )); then
+  echo "==> rebuilding frontend (packages/app) and syncing to static/"
+  "$SYNC_FRONTEND" --build
+fi
 
 # Ensure binfmt is registered so the host can exec foreign-arch binaries.
 # Safe to run repeatedly; Docker Desktop persists the registration.

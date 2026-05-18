@@ -7,6 +7,15 @@ node_modules
 .env.build
 /target
 packages/server/dist/
+# Embedded frontend assets — built from packages/app and copied in by
+# packages/server/scripts/sync-frontend.sh (or build-pi.sh). Treat as build
+# output: gitignored, populated at release-build time, but the dir tree
+# (with .gitkeep) is checked in so rust-embed has something to look at.
+packages/server/static/client/*
+!packages/server/static/client/.gitkeep
+packages/server/static/public/*
+!packages/server/static/public/.gitkeep
+packages/server/static/manifest.json
 *.pem
 .claude/settings.local.json
 .claude/worktrees/

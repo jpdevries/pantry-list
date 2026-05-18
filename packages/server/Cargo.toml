@@ -36,6 +36,12 @@ regex = "1"
 # Image variant generation for /upload. WebP encoding goes through the pure-Rust
 # image-webp crate (enabled by the `webp` feature), so no native libs are needed.
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
+# Embed the Rex-built frontend (`packages/app/.rex/build/client/` + `public/`)
+# at compile time. Empty `static/` dir is fine — the binary just serves a
+# placeholder shell. `build-pi.sh` (or `scripts/sync-frontend.sh`) populates
+# the dir before `cargo build --release`.
+rust-embed = { version = "8", default-features = false, features = ["interpolate-folder-path", "include-exclude"] }
+mime_guess = "2"
 
 # [profile.release] lives at the workspace root (../../Cargo.toml). Cargo
 # ignores per-package profile blocks in a workspace.

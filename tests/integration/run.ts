@@ -134,7 +134,7 @@ async function setup(): Promise<Handle> {
         mockUrl: serverFacingMockUrl,
       });
     } else {
-      handle.child = spawnNativeServer({ port, dbPath, uploadsDir, mockUrl: mock.url });
+      handle.child = spawnNativeServer({ port, dbPath, uploadsDir, mockUrl: mock.url, dbDir });
     }
     // Foreign-arch containers under QEMU need a longer ready window; native is fast.
     await waitForServer(url, DOCKER_MODE ? 60_000 : 10_000);
@@ -167,6 +167,7 @@ function spawnNativeServer(opts: {
   dbPath: string;
   uploadsDir: string;
   mockUrl: string;
+  dbDir: string;
 }): ChildProcess {
   console.log(`[harness] Spawning Rust GraphQL server on :${opts.port}…`);
   // The Rust server writes uploads relative to its cwd (default
@@ -182,6 +183,15 @@ function spawnNativeServer(opts: {
       ENABLE_IMAGE_PROCESSING: 'false',
       UPLOADS_DIR: opts.uploadsDir,
       RUST_LOG: process.env.RUST_LOG ?? 'warn',
+      // /api/* routes added in the SPA-embed port. Deterministic test
+      // values for the keys settings-read masks; isolated paths for the
+      // overrides + cache so each run starts clean.
+      RECIPE_API_KEY: 'rapi_test_secret_12345_long_enough_to_mask',
+      PIXABAY_API_KEY: 'pixabay_test_secret_67890_long_enough',
+      OVERRIDES_PATH: join(opts.dbDir, '.settings-overrides.json'),
+      CACHE_DIR: join(opts.dbDir, '.cache'),
+      OFF_BASE_URL: opts.mockUrl,
+      WIKIBOOKS_BASE_URL: opts.mockUrl,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -217,6 +227,14 @@ async function spawnContainer(opts: {
     '-e', 'AI_API_KEY=test-key-anthropic-mock',
     '-e', 'ENABLE_IMAGE_PROCESSING=false',
     '-e', `RUST_LOG=${process.env.RUST_LOG ?? 'warn'}`,
+    // /api/* route env (mirror spawnNativeServer). OVERRIDES_PATH +
+    // CACHE_DIR live under /data so they share the bind-mount lifetime.
+    '-e', 'RECIPE_API_KEY=rapi_test_secret_12345_long_enough_to_mask',
+    '-e', 'PIXABAY_API_KEY=pixabay_test_secret_67890_long_enough',
+    '-e', 'OVERRIDES_PATH=/data/.settings-overrides.json',
+    '-e', 'CACHE_DIR=/data/.cache',
+    '-e', `OFF_BASE_URL=${opts.mockUrl}`,
+    '-e', `WIKIBOOKS_BASE_URL=${opts.mockUrl}`,
     SERVER_IMAGE,
   );
 

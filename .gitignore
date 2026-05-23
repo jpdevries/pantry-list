@@ -17,3 +17,12 @@ CLAUDE.local.md
 witness/output/*
 !witness/output/.gitkeep
 tests/integration/__harness__.json
+
+# SQLite runtime + WAL/SHM sidecars (per-machine dev/test artifacts).
+# Both the app's `./pantry.db` and any *-snapshot.db files from
+# PG→SQLite migration runs live here untracked.
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3

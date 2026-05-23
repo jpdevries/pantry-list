@@ -36,11 +36,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
+    const slug = (req.query.slug as string) || '';
     const q = (req.query.q as string) || '';
     const offset = parseInt(req.query.offset as string) || 0;
     const limit = Math.min(parseInt(req.query.limit as string) || 48, 100);
 
     const data = await getData();
+
+    // Single-entry lookup by slug (used by /import/wikibooks/{slug} preview).
+    if (slug) {
+      const entry = data.find((e) => e.slug === slug);
+      if (!entry) return res.status(404).json({ error: `No Wikibooks entry with slug "${slug}"` });
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      return res.status(200).json({ entry });
+    }
+
     const filtered = q ? searchWikibooks(q, data) : data;
     const page = filtered.slice(offset, offset + limit);
 

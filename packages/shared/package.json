@@ -58,6 +58,7 @@
     "./components/allergen-icons": "./src/components/allergen-icons.ts",
     "./components/IngredientMetaPanel": "./src/components/IngredientMetaPanel.tsx",
     "./components/AtRecipeDetail": "./src/components/AtRecipeDetail.tsx",
+    "./components/ImportPreview": "./src/components/ImportPreview.tsx",
     "./components/AtMenuDetail": "./src/components/AtMenuDetail.tsx",
     "./components/UrlRecipeDetail": "./src/components/UrlRecipeDetail.tsx",
     "./components/QRCodeModal": "./src/components/QRCodeModal.tsx",

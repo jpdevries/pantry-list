@@ -388,6 +388,39 @@ export default function RecipeImportPage() {
   const [mdImportProgress, setMdImportProgress] = useState<{ done: number; total: number } | null>(null);
   const [mdError, setMdError] = useState<string | null>(null);
   const mdDebounceRef = useRef<ReturnType<typeof setTimeout>>();
+  // User Flow toggles — browse routes to per-recipe preview pages, bulk
+  // keeps the checkbox-grid batch-import behavior. One per source so
+  // each tab can be configured independently.
+  const [mdMode, setMdMode] = useState<'bulk' | 'browse'>(() => {
+    if (isServer) return 'bulk';
+    return (localStorage.getItem('import-mode-mealdb') as 'bulk' | 'browse') || 'bulk';
+  });
+  const [cdMode, setCdMode] = useState<'bulk' | 'browse'>(() => {
+    if (isServer) return 'bulk';
+    return (localStorage.getItem('import-mode-cocktaildb') as 'bulk' | 'browse') || 'bulk';
+  });
+  const [pdrMode, setPdrMode] = useState<'bulk' | 'browse'>(() => {
+    if (isServer) return 'bulk';
+    return (localStorage.getItem('import-mode-publicdomain') as 'bulk' | 'browse') || 'bulk';
+  });
+  const [raMode, setRaMode] = useState<'bulk' | 'browse'>(() => {
+    if (isServer) return 'bulk';
+    return (localStorage.getItem('import-mode-recipe-api') as 'bulk' | 'browse') || 'bulk';
+  });
+  const [clMode, setClMode] = useState<'bulk' | 'browse'>(() => {
+    if (isServer) return 'bulk';
+    return (localStorage.getItem('import-mode-cooklang') as 'bulk' | 'browse') || 'bulk';
+  });
+  const [wbMode, setWbMode] = useState<'bulk' | 'browse'>(() => {
+    if (isServer) return 'bulk';
+    return (localStorage.getItem('import-mode-wikibooks') as 'bulk' | 'browse') || 'bulk';
+  });
+  useEffect(() => { if (isBrowser) localStorage.setItem('import-mode-mealdb', mdMode); }, [mdMode]);
+  useEffect(() => { if (isBrowser) localStorage.setItem('import-mode-cocktaildb', cdMode); }, [cdMode]);
+  useEffect(() => { if (isBrowser) localStorage.setItem('import-mode-publicdomain', pdrMode); }, [pdrMode]);
+  useEffect(() => { if (isBrowser) localStorage.setItem('import-mode-recipe-api', raMode); }, [raMode]);
+  useEffect(() => { if (isBrowser) localStorage.setItem('import-mode-cooklang', clMode); }, [clMode]);
+  useEffect(() => { if (isBrowser) localStorage.setItem('import-mode-wikibooks', wbMode); }, [wbMode]);
 
   useEffect(() => { getMealDBCategories().then(setMdCategories).catch(() => {}); }, []);
 
@@ -932,6 +965,19 @@ export default function RecipeImportPage() {
 
             {communityTab === 'cooklang' && (<div role="tabpanel" id="tabpanel-cooklang" aria-labelledby="tab-cooklang">
 
+            <fieldset className="mb-4 card p-3 text-sm">
+              <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-secondary)]">User Flow</legend>
+              <div className="flex flex-wrap gap-4 px-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="cl-mode" value="browse" checked={clMode === 'browse'} onChange={() => setClMode('browse')} className="accent-accent" />
+                  <span>Browse &amp; Import</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="cl-mode" value="bulk" checked={clMode === 'bulk'} onChange={() => setClMode('bulk')} className="accent-accent" />
+                  <span>Bulk Import</span>
+                </label>
+              </div>
+            </fieldset>
             <div className="relative mb-4">
               <MagnifyingGlass size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-secondary)]" aria-hidden />
               <input
@@ -963,7 +1009,11 @@ export default function RecipeImportPage() {
                   ariaKeyshortcuts="Meta+Enter"
                 >
                   {clResults.map((r) => (
-                    <CooklangCard key={r.id} result={r} selected={clSelected.has(r.id)} selectedCount={clSelected.size} onImport={handleCooklangImport} onToggle={() => clToggleSelect(r.id)} />
+                    clMode === 'browse'
+                      ? <a key={r.id} href={`/kitchens/${kitchen}/import/cooklang/${r.id}#stage`} className="group card overflow-hidden p-4 transition-colors hover:border-accent">
+                          <p className="font-semibold text-sm leading-snug">{r.title}</p>
+                        </a>
+                      : <CooklangCard key={r.id} result={r} selected={clSelected.has(r.id)} selectedCount={clSelected.size} onImport={handleCooklangImport} onToggle={() => clToggleSelect(r.id)} />
                   ))}
                 </ImportGrid>
 
@@ -980,7 +1030,7 @@ export default function RecipeImportPage() {
                   </div>
                 )}
 
-                {clSelected.size > 0 && (
+                {clMode === 'bulk' && clSelected.size > 0 && (
                   <div className="text-center">
                     <button
                       type="button"
@@ -1007,6 +1057,20 @@ export default function RecipeImportPage() {
 
             {communityTab === 'mealdb' && (
             <div role="tabpanel" id="tabpanel-mealdb" aria-labelledby="tab-mealdb">
+            {/* User Flow toggle — mirrors the bluesky feed page's pattern. */}
+            <fieldset className="mb-4 card p-3 text-sm">
+              <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-secondary)]">User Flow</legend>
+              <div className="flex flex-wrap gap-4 px-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="mealdb-mode" value="browse" checked={mdMode === 'browse'} onChange={() => setMdMode('browse')} className="accent-accent" />
+                  <span>Browse &amp; Import</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="mealdb-mode" value="bulk" checked={mdMode === 'bulk'} onChange={() => setMdMode('bulk')} className="accent-accent" />
+                  <span>Bulk Import</span>
+                </label>
+              </div>
+            </fieldset>
             <div className="flex flex-col sm:flex-row gap-3 mb-4 sm:items-end">
               <div className="flex-1">
                 <label htmlFor="mealdb-search" className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-secondary)] mb-1 block">Search</label>
@@ -1046,26 +1110,40 @@ export default function RecipeImportPage() {
                     const thumb = r.strMealThumb;
                     const cat = 'strCategory' in r ? (r as MealDBMeal).strCategory : null;
                     const area = 'strArea' in r ? (r as MealDBMeal).strArea : null;
+                    const thumbBlock = thumb && (
+                      <div className="aspect-[16/9] overflow-hidden bg-[var(--color-bg-card)]">
+                        <picture>
+                          <source media="(prefers-reduced-data: reduce)" srcSet={`${thumb}/preview`} />
+                          <source media="(monochrome)" srcSet={`${thumb}/preview`} />
+                          <img src={`${thumb}/preview`} srcSet={`${thumb} 2x`} alt={r.strMeal} className="w-full h-full object-cover" loading="lazy" />
+                        </picture>
+                      </div>
+                    );
+                    const meta = (
+                      <div className="min-w-0">
+                        <p className="font-semibold text-sm leading-snug">{r.strMeal}</p>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {cat && <span className="tag">{cat}</span>}
+                          {area && <span className="tag">{area}</span>}
+                        </div>
+                      </div>
+                    );
+                    if (mdMode === 'browse') {
+                      return (
+                        <a key={r.idMeal} href={`/kitchens/${kitchen}/import/mealdb/${r.idMeal}#stage`} className="group card overflow-hidden transition-colors hover:border-accent">
+                          {thumbBlock}
+                          <div className="p-3 flex items-start gap-3">
+                            {meta}
+                          </div>
+                        </a>
+                      );
+                    }
                     return (
                       <label key={r.idMeal} className={`group card overflow-hidden cursor-pointer transition-colors ${isSel ? 'border-accent bg-[var(--color-accent-subtle)]' : ''}`}>
-                        {thumb && (
-                          <div className="aspect-[16/9] overflow-hidden bg-[var(--color-bg-card)]">
-                            <picture>
-                              <source media="(prefers-reduced-data: reduce)" srcSet={`${thumb}/preview`} />
-                              <source media="(monochrome)" srcSet={`${thumb}/preview`} />
-                              <img src={`${thumb}/preview`} srcSet={`${thumb} 2x`} alt={r.strMeal} className="w-full h-full object-cover" loading="lazy" />
-                            </picture>
-                          </div>
-                        )}
+                        {thumbBlock}
                         <div className="p-3 flex items-start gap-3">
                           <input type="checkbox" checked={isSel} onChange={() => mdToggleSelect(r.idMeal)} className="mt-1 w-4 h-4 shrink-0 accent-accent" />
-                          <div className="min-w-0">
-                            <p className="font-semibold text-sm leading-snug">{r.strMeal}</p>
-                            <div className="flex flex-wrap gap-1 mt-1">
-                              {cat && <span className="tag">{cat}</span>}
-                              {area && <span className="tag">{area}</span>}
-                            </div>
-                          </div>
+                          {meta}
                         </div>
                         {isSel && mdSelected.size > 0 && (
                           <button type="button" onClick={(e) => { e.preventDefault(); handleMealDBImport(); }} className="hidden group-focus-within:block btn-primary text-xs mx-3 mb-3 w-[calc(100%-1.5rem)]">
@@ -1077,7 +1155,7 @@ export default function RecipeImportPage() {
                   })}
                 </ImportGrid>
 
-                {mdSelected.size > 0 && (
+                {mdMode === 'bulk' && mdSelected.size > 0 && (
                   <div className="text-center">
                     <button type="button" onClick={handleMealDBImport} disabled={mdImporting} aria-busy={mdImporting} className="btn-primary">
                       {mdImporting && mdImportProgress ? `Importing ${mdImportProgress.done}/${mdImportProgress.total}\u2026` : `Import Selected (${mdSelected.size})`}
@@ -1096,6 +1174,19 @@ export default function RecipeImportPage() {
             </div>)}
 
             {communityTab === 'publicdomain' && (<div role="tabpanel" id="tabpanel-publicdomain" aria-labelledby="tab-publicdomain">
+            <fieldset className="mb-4 card p-3 text-sm">
+              <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-secondary)]">User Flow</legend>
+              <div className="flex flex-wrap gap-4 px-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="pdr-mode" value="browse" checked={pdrMode === 'browse'} onChange={() => setPdrMode('browse')} className="accent-accent" />
+                  <span>Browse &amp; Import</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="pdr-mode" value="bulk" checked={pdrMode === 'bulk'} onChange={() => setPdrMode('bulk')} className="accent-accent" />
+                  <span>Bulk Import</span>
+                </label>
+              </div>
+            </fieldset>
             <div className="relative mb-4">
               <MagnifyingGlass size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-secondary)]" aria-hidden />
               <input type="search" value={pdrQuery} onChange={(e) => setPdrQuery(e.target.value)} placeholder="Search 408 public domain recipes..." className="field-input w-full pl-9" />
@@ -1114,23 +1205,35 @@ export default function RecipeImportPage() {
                 >
                   {pdrResults.map((r) => {
                     const isSel = pdrSelected.has(r.slug);
+                    const thumbBlock = r.hasImage ? (
+                      <div className="aspect-[16/9] overflow-hidden bg-[var(--color-bg-card)]">
+                        <img src={getPublicDomainImageUrl(r.slug)} alt={r.title} className="w-full h-full object-cover" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).parentElement!.style.display = 'none'; }} />
+                      </div>
+                    ) : (
+                      <div className="aspect-[16/9] flex items-center justify-center bg-[var(--color-bg-card)] text-[var(--color-text-secondary)] opacity-30">
+                        <CookingPot size={48} weight="light" aria-hidden />
+                      </div>
+                    );
+                    const meta = (
+                      <div className="min-w-0">
+                        <p className="font-semibold text-sm leading-snug">{r.title}</p>
+                        {r.tags.length > 0 && <div className="flex flex-wrap gap-1 mt-2">{r.tags.slice(0, 4).map((t) => <span key={t} className="tag">{t}</span>)}</div>}
+                      </div>
+                    );
+                    if (pdrMode === 'browse') {
+                      return (
+                        <a key={r.slug} href={`/kitchens/${kitchen}/import/publicdomain/${r.slug}#stage`} className="group card overflow-hidden transition-colors hover:border-accent">
+                          {thumbBlock}
+                          <div className="p-3 flex items-start gap-3">{meta}</div>
+                        </a>
+                      );
+                    }
                     return (
                       <label key={r.slug} className={`group card overflow-hidden cursor-pointer transition-colors ${isSel ? 'border-accent bg-[var(--color-accent-subtle)]' : ''}`}>
-                        {r.hasImage ? (
-                          <div className="aspect-[16/9] overflow-hidden bg-[var(--color-bg-card)]">
-                            <img src={getPublicDomainImageUrl(r.slug)} alt={r.title} className="w-full h-full object-cover" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).parentElement!.style.display = 'none'; }} />
-                          </div>
-                        ) : (
-                          <div className="aspect-[16/9] flex items-center justify-center bg-[var(--color-bg-card)] text-[var(--color-text-secondary)] opacity-30">
-                            <CookingPot size={48} weight="light" aria-hidden />
-                          </div>
-                        )}
+                        {thumbBlock}
                         <div className="p-3 flex items-start gap-3">
                           <input type="checkbox" checked={isSel} onChange={() => pdrToggleSelect(r.slug)} className="mt-1 w-4 h-4 shrink-0 accent-accent" />
-                          <div className="min-w-0">
-                            <p className="font-semibold text-sm leading-snug">{r.title}</p>
-                            {r.tags.length > 0 && <div className="flex flex-wrap gap-1 mt-2">{r.tags.slice(0, 4).map((t) => <span key={t} className="tag">{t}</span>)}</div>}
-                          </div>
+                          {meta}
                         </div>
                         {isSel && pdrSelected.size > 0 && (
                           <button type="button" onClick={(e) => { e.preventDefault(); handlePdrImport(); }} className="hidden group-focus-within:block btn-primary text-xs mx-3 mb-3 w-[calc(100%-1.5rem)]">
@@ -1142,7 +1245,7 @@ export default function RecipeImportPage() {
                   })}
                 </ImportGrid>
 
-                {pdrSelected.size > 0 && (
+                {pdrMode === 'bulk' && pdrSelected.size > 0 && (
                   <div className="text-center">
                     <button type="button" onClick={handlePdrImport} disabled={pdrImporting} aria-busy={pdrImporting} className="btn-primary">
                       {pdrImporting && pdrImportProgress ? `Importing ${pdrImportProgress.done}/${pdrImportProgress.total}\u2026` : `Import Selected (${pdrSelected.size})`}
@@ -1158,6 +1261,19 @@ export default function RecipeImportPage() {
             </div>)}
 
             {communityTab === 'wikibooks' && (<div role="tabpanel" id="tabpanel-wikibooks" aria-labelledby="tab-wikibooks">
+              <fieldset className="mb-4 card p-3 text-sm">
+                <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-secondary)]">User Flow</legend>
+                <div className="flex flex-wrap gap-4 px-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="wb-mode" value="browse" checked={wbMode === 'browse'} onChange={() => setWbMode('browse')} className="accent-accent" />
+                    <span>Browse &amp; Import</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="wb-mode" value="bulk" checked={wbMode === 'bulk'} onChange={() => setWbMode('bulk')} className="accent-accent" />
+                    <span>Bulk Import</span>
+                  </label>
+                </div>
+              </fieldset>
               <div className="relative mb-4">
                 <MagnifyingGlass size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-secondary)]" aria-hidden />
                 <input
@@ -1205,43 +1321,55 @@ export default function RecipeImportPage() {
                   onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && wbSelected.size > 0) { e.preventDefault(); handleWikibooksImport(); } }}
                   ariaKeyshortcuts="Meta+Enter"
                 >
-                  {wbResults.map((r) => (
-                    <label key={r.slug} className={`group card p-4 cursor-pointer transition-colors ${wbSelected.has(r.slug) ? 'ring-2 ring-accent' : ''}`}>
-                      <div className="flex items-start gap-3">
-                        <input
-                          type="checkbox"
-                          checked={wbSelected.has(r.slug)}
-                          onChange={() => setWbSelected((prev) => { const n = new Set(prev); if (n.has(r.slug)) n.delete(r.slug); else n.add(r.slug); return n; })}
-                          className="mt-1 accent-accent"
-                        />
-                        <div className="flex-1 min-w-0">
-                          <p className="font-semibold text-sm">{r.title}</p>
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {r.tags.filter((t) => t !== 'wikibooks').slice(0, 3).map((t) => (
-                              <span key={t} className="tag text-xs">{t}</span>
-                            ))}
-                            {r.difficulty != null && (
-                              <span className="text-xs text-[var(--color-text-secondary)]">{'★'.repeat(r.difficulty)}{'☆'.repeat(5 - r.difficulty)}</span>
-                            )}
-                          </div>
-                          {(r.servings || r.time) && (
-                            <p className="text-xs text-[var(--color-text-secondary)] mt-1">
-                              {[r.servings && `${r.servings} servings`, r.time].filter(Boolean).join(' · ')}
-                            </p>
+                  {wbResults.map((r) => {
+                    const meta = (
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-sm">{r.title}</p>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {r.tags.filter((t) => t !== 'wikibooks').slice(0, 3).map((t) => (
+                            <span key={t} className="tag text-xs">{t}</span>
+                          ))}
+                          {r.difficulty != null && (
+                            <span className="text-xs text-[var(--color-text-secondary)]">{'★'.repeat(r.difficulty)}{'☆'.repeat(5 - r.difficulty)}</span>
                           )}
                         </div>
+                        {(r.servings || r.time) && (
+                          <p className="text-xs text-[var(--color-text-secondary)] mt-1">
+                            {[r.servings && `${r.servings} servings`, r.time].filter(Boolean).join(' · ')}
+                          </p>
+                        )}
                       </div>
-                      {wbSelected.has(r.slug) && wbSelected.size > 0 && (
-                        <button type="button" onClick={(e) => { e.preventDefault(); handleWikibooksImport(); }} className="hidden group-focus-within:block btn-primary text-xs mt-2 w-full">
-                          Import {wbSelected.size} selected
-                        </button>
-                      )}
-                    </label>
-                  ))}
+                    );
+                    if (wbMode === 'browse') {
+                      return (
+                        <a key={r.slug} href={`/kitchens/${kitchen}/import/wikibooks/${r.slug}#stage`} className="group card p-4 transition-colors hover:border-accent">
+                          <div className="flex items-start gap-3">{meta}</div>
+                        </a>
+                      );
+                    }
+                    return (
+                      <label key={r.slug} className={`group card p-4 cursor-pointer transition-colors ${wbSelected.has(r.slug) ? 'ring-2 ring-accent' : ''}`}>
+                        <div className="flex items-start gap-3">
+                          <input
+                            type="checkbox"
+                            checked={wbSelected.has(r.slug)}
+                            onChange={() => setWbSelected((prev) => { const n = new Set(prev); if (n.has(r.slug)) n.delete(r.slug); else n.add(r.slug); return n; })}
+                            className="mt-1 accent-accent"
+                          />
+                          {meta}
+                        </div>
+                        {wbSelected.has(r.slug) && wbSelected.size > 0 && (
+                          <button type="button" onClick={(e) => { e.preventDefault(); handleWikibooksImport(); }} className="hidden group-focus-within:block btn-primary text-xs mt-2 w-full">
+                            Import {wbSelected.size} selected
+                          </button>
+                        )}
+                      </label>
+                    );
+                  })}
                 </ImportGrid>
               )}
 
-              {wbSelected.size > 0 && (
+              {wbMode === 'bulk' && wbSelected.size > 0 && (
                 <div className="sticky bottom-4 mt-6 flex justify-center">
                   <button
                     onClick={handleWikibooksImport}
@@ -1266,6 +1394,19 @@ export default function RecipeImportPage() {
                   <button onClick={() => { localStorage.setItem('age-verified', 'true'); setCdAgeVerified(true); }} className="btn-primary">I am 21 or older</button>
                 </div>
               ) : (<>
+              <fieldset className="mb-4 card p-3 text-sm">
+                <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-secondary)]">User Flow</legend>
+                <div className="flex flex-wrap gap-4 px-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="cd-mode" value="browse" checked={cdMode === 'browse'} onChange={() => setCdMode('browse')} className="accent-accent" />
+                    <span>Browse &amp; Import</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="cd-mode" value="bulk" checked={cdMode === 'bulk'} onChange={() => setCdMode('bulk')} className="accent-accent" />
+                    <span>Bulk Import</span>
+                  </label>
+                </div>
+              </fieldset>
               <div className="flex flex-col sm:flex-row gap-2 mb-4 sm:items-end">
                 <div className="flex-1">
                   <label htmlFor="cocktaildb-search" className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-secondary)] mb-1 block">Search</label>
@@ -1324,16 +1465,28 @@ export default function RecipeImportPage() {
                     const id = 'idDrink' in r ? r.idDrink : '';
                     const name = 'strDrink' in r ? r.strDrink : '';
                     const thumb = 'strDrinkThumb' in r ? r.strDrinkThumb : null;
+                    const thumbEl = thumb && <img src={thumb} alt={name} className="w-full aspect-[4/3] object-cover" loading="lazy" />;
+                    const meta = (
+                      <div>
+                        <p className="font-semibold text-sm">{name}</p>
+                        {('strCategory' in r && r.strCategory) && <span className="tag text-xs mr-1">{r.strCategory}</span>}
+                        {('strAlcoholic' in r && r.strAlcoholic) && <span className="tag text-xs">{r.strAlcoholic}</span>}
+                      </div>
+                    );
+                    if (cdMode === 'browse') {
+                      return (
+                        <a key={id} href={`/kitchens/${kitchen}/import/cocktaildb/${id}#stage`} className="group card overflow-hidden transition-colors hover:border-accent">
+                          {thumbEl}
+                          <div className="p-3 flex items-start gap-2">{meta}</div>
+                        </a>
+                      );
+                    }
                     return (
                       <label key={id} className={`group card overflow-hidden cursor-pointer transition-colors ${cdSelected.has(id) ? 'ring-2 ring-accent' : ''}`}>
-                        {thumb && <img src={thumb} alt={name} className="w-full aspect-[4/3] object-cover" loading="lazy" />}
+                        {thumbEl}
                         <div className="p-3 flex items-start gap-2">
                           <input type="checkbox" checked={cdSelected.has(id)} onChange={() => setCdSelected((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; })} className="mt-1 accent-accent" />
-                          <div>
-                            <p className="font-semibold text-sm">{name}</p>
-                            {('strCategory' in r && r.strCategory) && <span className="tag text-xs mr-1">{r.strCategory}</span>}
-                            {('strAlcoholic' in r && r.strAlcoholic) && <span className="tag text-xs">{r.strAlcoholic}</span>}
-                          </div>
+                          {meta}
                         </div>
                         {cdSelected.has(id) && cdSelected.size > 0 && (
                           <button type="button" onClick={(e) => { e.preventDefault(); handleCocktailDBImport(); }} className="hidden group-focus-within:block btn-primary text-xs mx-3 mb-3 w-[calc(100%-1.5rem)]">
@@ -1346,7 +1499,7 @@ export default function RecipeImportPage() {
                 </ImportGrid>
               )}
 
-              {cdSelected.size > 0 && (
+              {cdMode === 'bulk' && cdSelected.size > 0 && (
                 <div className="sticky bottom-4 mt-6 flex justify-center">
                   <button
                     onClick={handleCocktailDBImport}
@@ -1428,6 +1581,19 @@ export default function RecipeImportPage() {
               )}
 
               {recipeApiKey && (<>
+              <fieldset className="mb-4 card p-3 text-sm">
+                <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-secondary)]">User Flow</legend>
+                <div className="flex flex-wrap gap-4 px-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="ra-mode" value="browse" checked={raMode === 'browse'} onChange={() => setRaMode('browse')} className="accent-accent" />
+                    <span>Browse &amp; Import</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="ra-mode" value="bulk" checked={raMode === 'bulk'} onChange={() => setRaMode('bulk')} className="accent-accent" />
+                    <span>Bulk Import</span>
+                  </label>
+                </div>
+              </fieldset>
               <div className="flex flex-col sm:flex-row gap-3 mb-6 sm:items-end">
                 <div className="flex-1">
                   <label htmlFor="recipe-api-search" className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-secondary)] mb-1 block">Search</label>
@@ -1469,24 +1635,34 @@ export default function RecipeImportPage() {
                 >
                   {raResults.map((r) => {
                     const isSelected = raSelected.has(r.id);
+                    const meta = (
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-sm leading-snug">{r.name}</p>
+                        <div className="flex flex-wrap gap-1 mt-2">
+                          {r.category && <span className="tag">{r.category}</span>}
+                          {r.cuisine && <span className="tag">{r.cuisine}</span>}
+                          {r.difficulty && <span className="tag">{r.difficulty}</span>}
+                          {r.dietary?.flags?.slice(0, 2).map((f) => <span key={f} className="tag">{f}</span>)}
+                        </div>
+                        {r.nutrition_summary?.calories != null && (
+                          <p className="text-xs text-[var(--color-text-secondary)] mt-2">
+                            {Math.round(r.nutrition_summary.calories)} kcal · {Math.round(r.nutrition_summary.protein_g ?? 0)}g protein
+                          </p>
+                        )}
+                      </div>
+                    );
+                    if (raMode === 'browse') {
+                      return (
+                        <a key={r.id} href={`/kitchens/${kitchen}/import/recipe-api/${r.id}#stage`} className="group card p-4 transition-colors hover:border-accent">
+                          <div className="flex items-start gap-3">{meta}</div>
+                        </a>
+                      );
+                    }
                     return (
                       <label key={r.id} className={`group card p-4 cursor-pointer transition-colors ${isSelected ? 'border-accent bg-[var(--color-accent-subtle)]' : ''}`}>
                         <div className="flex items-start gap-3">
                           <input type="checkbox" checked={isSelected} onChange={() => raToggleSelect(r.id)} className="mt-1 w-4 h-4 shrink-0" />
-                          <div className="min-w-0 flex-1">
-                            <p className="font-semibold text-sm leading-snug">{r.name}</p>
-                            <div className="flex flex-wrap gap-1 mt-2">
-                              {r.category && <span className="tag">{r.category}</span>}
-                              {r.cuisine && <span className="tag">{r.cuisine}</span>}
-                              {r.difficulty && <span className="tag">{r.difficulty}</span>}
-                              {r.dietary?.flags?.slice(0, 2).map((f) => <span key={f} className="tag">{f}</span>)}
-                            </div>
-                            {r.nutrition_summary?.calories != null && (
-                              <p className="text-xs text-[var(--color-text-secondary)] mt-2">
-                                {Math.round(r.nutrition_summary.calories)} kcal · {Math.round(r.nutrition_summary.protein_g ?? 0)}g protein
-                              </p>
-                            )}
-                          </div>
+                          {meta}
                         </div>
                         {isSelected && raSelected.size > 0 && (
                           <button type="button" onClick={(e) => { e.preventDefault(); handleRecipeApiImport(); }} className="hidden group-focus-within:block btn-primary text-xs mt-3 w-full">
@@ -1499,7 +1675,7 @@ export default function RecipeImportPage() {
                 </ImportGrid>
               )}
 
-              {raSelected.size > 0 && !raImportProgress && (
+              {raMode === 'bulk' && raSelected.size > 0 && !raImportProgress && (
                 <div className="sticky bottom-4 flex justify-end">
                   <button type="button" onClick={handleRecipeApiImport} disabled={raImporting} className="btn-primary shadow-lg">
                     Import {raSelected.size} selected

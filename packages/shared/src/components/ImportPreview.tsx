@@ -1,82 +1,68 @@
 /**
- * Shared AT Protocol recipe detail + import CTA.
+ * Generic recipe import preview + CTA.
  *
- * Renders a full recipe detail view for an exchange.recipe.recipe record
- * fetched from the AT Protocol network. Used by both packages/app (Rex)
- * and packages/web (PGlite) as the `/at/*` route handler.
+ * Renders a full recipe detail view for any non-AT source (MealDB,
+ * CocktailDB, Recipe-API, PublicDomain, Wikibooks, Cooklang). Used by
+ * the per-source `/import/{source}/{id}` routes in both packages.
+ *
+ * Mirrors the shape of AtRecipeDetail so the browse-before-import UX
+ * feels identical across sources. The two components stay parallel for
+ * now; future cleanup can lift the shared body into a single primitive.
  *
  * The caller provides:
- * - `atUri`: the canonical AT URI to fetch
- * - `onImport(recipe)`: callback to run the createRecipe mutation
- * - `checkDuplicate(atUri)`: check if already imported (returns slug or null)
- * - `recipeBasePath`: e.g. "/recipes" or "/kitchens/home/recipes"
- * - `shareUrl`: the full page URL for QR code / clipboard
+ * - `state`: load/recipe/error — caller owns the fetch lifecycle
+ * - `sourceLabel`: e.g. "TheMealDB", "Wikibooks"
+ * - `sourceAttributionUrl`: optional link back to the canonical source page
+ * - `attributionLabel`: e.g. "themealdb.com" — display text for the source link
+ * - `shareUrl`: full page URL for QR / clipboard share (this preview URL)
+ * - `existingSlug`: non-null if a recipe with this sourceUrl already exists locally
+ * - `onImport()`: trigger the createRecipe mutation
+ * - `renderRecipeLink(slug, children)`: navigate to a local recipe — app <a>, web router
  */
-import { useState, useEffect, useCallback } from 'react';
-import { fetchBlueskyRecipe, parseAtUri, isRecipeUri, type ParsedRecipe } from '../bluesky';
+import { useState } from 'react';
+import { type ParsedRecipe } from '../bluesky';
 import { groupIngredients } from '../ingredient-groups';
 import QRCodeModal from './QRCodeModal';
 import { ShareNetwork, ArrowSquareIn, Warning, SpinnerGap } from '@phosphor-icons/react';
 
-interface AtRecipeDetailProps {
-  atUri: string;
-  shareUrl: string;
-  recipeBasePath: string;
-  onImport: (recipe: ParsedRecipe) => Promise<{ slug: string }>;
-  checkDuplicate: (sourceUrl: string) => Promise<string | null>;
-  /** Navigate to a local recipe — app uses <a href>, web uses router.navigate */
-  renderRecipeLink: (slug: string, children: React.ReactNode) => React.ReactNode;
-}
-
-type PageState =
+export type ImportPreviewState =
   | { kind: 'loading' }
-  | { kind: 'recipe'; recipe: ParsedRecipe; existingSlug: string | null }
+  | { kind: 'recipe'; recipe: ParsedRecipe }
   | { kind: 'importing'; recipe: ParsedRecipe }
   | { kind: 'imported'; slug: string }
   | { kind: 'error'; message: string };
 
-export default function AtRecipeDetail({
-  atUri,
+interface ImportPreviewProps {
+  state: ImportPreviewState;
+  sourceLabel: string;
+  sourceAttributionUrl?: string;
+  attributionLabel?: string;
+  shareUrl: string;
+  existingSlug: string | null;
+  onImport: () => Promise<void>;
+  onRetry?: () => void;
+  renderRecipeLink: (slug: string, children: React.ReactNode) => React.ReactNode;
+}
+
+export default function ImportPreview({
+  state,
+  sourceLabel,
+  sourceAttributionUrl,
+  attributionLabel,
   shareUrl,
-  recipeBasePath,
+  existingSlug,
   onImport,
-  checkDuplicate,
+  onRetry,
   renderRecipeLink,
-}: AtRecipeDetailProps) {
-  const [state, setState] = useState<PageState>({ kind: 'loading' });
+}: ImportPreviewProps) {
   const [qrOpen, setQrOpen] = useState(false);
-
-  const load = useCallback(async () => {
-    setState({ kind: 'loading' });
-    try {
-      const recipe = await fetchBlueskyRecipe(atUri);
-      const existingSlug = await checkDuplicate(atUri);
-      setState({ kind: 'recipe', recipe, existingSlug });
-    } catch (err) {
-      setState({ kind: 'error', message: (err as Error).message });
-    }
-  }, [atUri, checkDuplicate]);
-
-  useEffect(() => { load(); }, [load]);
-
-  async function handleImport() {
-    if (state.kind !== 'recipe') return;
-    const { recipe } = state;
-    setState({ kind: 'importing', recipe });
-    try {
-      const { slug } = await onImport(recipe);
-      setState({ kind: 'imported', slug });
-    } catch (err) {
-      setState({ kind: 'error', message: `Import failed: ${(err as Error).message}` });
-    }
-  }
 
   // ── Loading ──
   if (state.kind === 'loading') {
     return (
       <div className="max-w-3xl mx-auto py-12 px-4 flex items-center gap-3 text-[var(--color-text-secondary)]">
         <SpinnerGap size={20} className="animate-spin" />
-        Fetching recipe from the AT Protocol network…
+        Fetching recipe from {sourceLabel}…
       </div>
     );
   }
@@ -90,7 +76,9 @@ export default function AtRecipeDetail({
           <div>
             <p className="font-semibold mb-1">Couldn't load recipe</p>
             <p className="text-sm text-[var(--color-text-secondary)] legible pretty">{state.message}</p>
-            <button onClick={load} className="btn-secondary text-sm mt-3">Try again</button>
+            {onRetry && (
+              <button onClick={onRetry} className="btn-secondary text-sm mt-3">Try again</button>
+            )}
           </div>
         </div>
       </div>
@@ -112,33 +100,29 @@ export default function AtRecipeDetail({
   }
 
   // ── Recipe detail (recipe or importing state) ──
-  const recipe = state.kind === 'importing' ? state.recipe : state.recipe;
-  const existingSlug = state.kind === 'recipe' ? state.existingSlug : null;
+  const recipe = state.recipe;
   const importing = state.kind === 'importing';
-
-  const parsed = parseAtUri(atUri);
-  const handle = recipe.description?.match(/@([\w.-]+) on Bluesky/)?.[1];
 
   return (
     <div className="max-w-3xl mx-auto py-8 px-4">
       {/* ── Import CTA bar ── */}
       <div className="card p-4 mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="flex items-center gap-2 min-w-0">
-          <svg
-            fill="currentColor"
-            viewBox="0 0 600 530"
-            width={20}
-            height={18}
-            aria-hidden="true"
-            className="shrink-0 opacity-60 text-[var(--color-text-secondary)]"
-          >
-            <path d="M135.72 44.03C202.216 93.951 273.74 195.17 299.91 249.49c26.17-54.32 97.694-155.539 164.19-205.46C512.18 8.005 590 -19.728 590 69.04c0 17.726-10.155 148.928-16.111 170.208-20.703 73.984-96.144 92.854-163.25 81.433 117.262 19.96 147.131 86.084 82.654 152.208-122.385 125.621-175.86-31.511-189.563-71.807-2.512-7.387-3.687-10.832-3.69-7.905-.003-2.927-1.179.518-3.69 7.905-13.704 40.296-67.18 197.428-189.563 71.807-64.477-66.124-34.61-132.251 82.65-152.208-67.105 11.421-142.548-7.45-163.25-81.433C20.232 217.968 10.077 86.766 10.077 69.04c0-88.768 77.82-61.035 125.9-25.01z" />
-          </svg>
-          {handle && (
-            <span className="text-sm text-[var(--color-text-secondary)] break-words min-w-0">
-              by <a href={`https://bsky.app/profile/${handle}`} target="_blank" rel="noopener noreferrer" className="underline">@{handle}</a>
-            </span>
-          )}
+          <span className="text-sm text-[var(--color-text-secondary)] break-words min-w-0">
+            from{' '}
+            {sourceAttributionUrl ? (
+              <a
+                href={sourceAttributionUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline"
+              >
+                {attributionLabel ?? sourceLabel}
+              </a>
+            ) : (
+              <span>{attributionLabel ?? sourceLabel}</span>
+            )}
+          </span>
         </div>
         <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 sm:shrink-0">
           <button
@@ -157,7 +141,7 @@ export default function AtRecipeDetail({
             ))
           ) : (
             <button
-              onClick={handleImport}
+              onClick={onImport}
               disabled={importing}
               className="btn-primary text-sm flex items-center justify-center gap-1.5"
             >
@@ -198,7 +182,7 @@ export default function AtRecipeDetail({
       {/* ── Tags ── */}
       {recipe.tags.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-6">
-          {recipe.tags.filter((t) => t !== 'bluesky').map((tag) => (
+          {recipe.tags.map((tag) => (
             <span key={tag} className="tag">{tag}</span>
           ))}
         </div>
@@ -213,10 +197,9 @@ export default function AtRecipeDetail({
             // preflight zeroes `list-style`, `margin`, and `padding` on
             // every ul, and the `list-disc` / `pl-6` utilities get
             // reliably stripped when this shared component renders
-            // through Rex's scanner (cross-package source globs miss
-            // these classes often enough). Inline styles win the
-            // specificity fight and render identically in every
-            // consumer.
+            // through Rex's scanner. Inline styles win the specificity
+            // fight and render identically in every consumer. Mirrors
+            // the workaround in AtRecipeDetail.
             <ul
               className="marker:text-[var(--color-text-secondary)]"
               style={{ listStyleType: 'disc', paddingInlineStart: '1.5rem' }}
@@ -250,10 +233,20 @@ export default function AtRecipeDetail({
         </ol>
       </section>
 
-      {/* ── Source ── */}
-      <p className="text-xs text-[var(--color-text-secondary)]">
-        Source: <a href={atUri.replace('at://', 'https://bsky.app/profile/').replace(/\/exchange\.recipe\.recipe\//, '/post/')} target="_blank" rel="noopener noreferrer" className="underline">AT Protocol</a>
-      </p>
+      {/* ── Source link ── */}
+      {recipe.sourceUrl && (
+        <p className="text-xs text-[var(--color-text-secondary)]">
+          Source:{' '}
+          <a
+            href={recipe.sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline"
+          >
+            {recipe.sourceUrl}
+          </a>
+        </p>
+      )}
 
       <QRCodeModal url={shareUrl} open={qrOpen} onClose={() => setQrOpen(false)} />
     </div>

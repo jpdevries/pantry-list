@@ -21,6 +21,12 @@ import AccessibilityPage from './pages/AccessibilityPage';
 import SettingsPage from './pages/SettingsPage';
 import AtImportPage from './pages/AtImportPage';
 import UrlImportPage from './pages/UrlImportPage';
+import MealdbImportPage from './pages/MealdbImportPage';
+import CocktaildbImportPage from './pages/CocktaildbImportPage';
+import PublicDomainImportPage from './pages/PublicDomainImportPage';
+import RecipeApiImportPage from './pages/RecipeApiImportPage';
+import CooklangImportPage from './pages/CooklangImportPage';
+import WikibooksImportPage from './pages/WikibooksImportPage';
 
 /**
  * Kitchen-scoped routes — rendered at both top level (home kitchen)
@@ -91,6 +97,18 @@ export default function App() {
           <Route path="/kitchens/:kitchen/at/*" element={<AtImportPage />} />
           <Route path="/http/*" element={<UrlImportPage scheme="http" />} />
           <Route path="/https/*" element={<UrlImportPage scheme="https" />} />
+          <Route path="/import/mealdb/:idMeal" element={<MealdbImportPage />} />
+          <Route path="/kitchens/:kitchen/import/mealdb/:idMeal" element={<MealdbImportPage />} />
+          <Route path="/import/cocktaildb/:idDrink" element={<CocktaildbImportPage />} />
+          <Route path="/kitchens/:kitchen/import/cocktaildb/:idDrink" element={<CocktaildbImportPage />} />
+          <Route path="/import/publicdomain/:slug" element={<PublicDomainImportPage />} />
+          <Route path="/kitchens/:kitchen/import/publicdomain/:slug" element={<PublicDomainImportPage />} />
+          <Route path="/import/recipe-api/:id" element={<RecipeApiImportPage />} />
+          <Route path="/kitchens/:kitchen/import/recipe-api/:id" element={<RecipeApiImportPage />} />
+          <Route path="/import/cooklang/:id" element={<CooklangImportPage />} />
+          <Route path="/kitchens/:kitchen/import/cooklang/:id" element={<CooklangImportPage />} />
+          <Route path="/import/wikibooks/:slug" element={<WikibooksImportPage />} />
+          <Route path="/kitchens/:kitchen/import/wikibooks/:slug" element={<WikibooksImportPage />} />
           <Route path="/accessibility" element={<AccessibilityPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>

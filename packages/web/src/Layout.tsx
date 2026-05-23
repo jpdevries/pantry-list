@@ -84,11 +84,20 @@ export default function Layout() {
     document.title = match ? `Pantry Host | ${match}` : 'Pantry Host';
   }, [location.pathname]);
 
-  // Scroll to #stage on route change — React Router doesn't handle hash scrolling
+  // Scroll to #stage on route change — React Router doesn't handle hash
+  // scrolling. Use window.scrollTo (not scrollIntoView) so the reset is
+  // instant and document-level — survives the layout shift when a new
+  // route renders a loading skeleton first and then swaps in the real
+  // content (e.g. the /import/{source}/{id} preview pages). Double-RAF
+  // ensures React's commit + style recalc are done before we scroll.
+  // `#stage` is always at document top in this Layout, so (0,0) is the
+  // same target without depending on the element being measurable.
   useEffect(() => {
     if (location.hash === '#stage') {
       requestAnimationFrame(() => {
-        document.getElementById('stage')?.scrollIntoView({ behavior: 'smooth' });
+        requestAnimationFrame(() => {
+          window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+        });
       });
     }
   }, [location.pathname, location.hash]);

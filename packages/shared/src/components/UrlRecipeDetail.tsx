@@ -164,14 +164,13 @@ export default function UrlRecipeDetail({
   return (
     <div className="max-w-3xl mx-auto py-8 px-4">
       {/* Import CTA bar */}
-      <div className="card p-4 mb-6 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
+      <div className="card p-4 mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-sm text-[var(--color-text-secondary)] break-words min-w-0">
             from <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="underline">{hostnameOf(sourceUrl)}</a>
           </span>
         </div>
-        <div className="hidden sm:block sm:flex-1" />
-        <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+        <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 sm:shrink-0">
           {existingSlug ? (
             renderRecipeLink(existingSlug, (
               <span className="btn-secondary text-sm inline-flex items-center justify-center gap-1.5">

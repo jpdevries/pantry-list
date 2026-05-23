@@ -16,3 +16,4 @@ CLAUDE.local.md
 .wrangler
 witness/output/*
 !witness/output/.gitkeep
+tests/integration/__harness__.json

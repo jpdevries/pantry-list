@@ -13,6 +13,7 @@
     "dev:web": "npm run dev -w packages/web",
     "dev:mcp": "npm run dev -w packages/mcp",
     "test:smoke": "npx tsx witness/run-smoke.ts",
+    "test:integration": "node tests/integration/run.ts",
     "screencasts": "npx tsx witness/screencasts/generate-all.ts"
   },
   "dependencies": {
@@ -23,7 +24,9 @@
     "react-dom": "^19.2.4"
   },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@types/pg": "^8.11.10",
+    "pg": "^8.13.1"
   },
   "optionalDependencies": {
     "@img/sharp-darwin-x64": "^0.34.5",

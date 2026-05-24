@@ -1,0 +1,38 @@
+[Unit]
+Description=Pantry Host server (axum + GraphQL + Rex SPA)
+Documentation=https://github.com/jpdevries/pantry-host
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Per-Pi user. This unit ships customized for `jw`; if your Pi user is
+# different, change User/Group + WorkingDirectory + the SQLITE_DB_PATH
+# env below. Adapted from Austin's `packages/server/scripts/pantry-server.service`
+# template (which defaults to `pi`).
+User=jw
+Group=jw
+WorkingDirectory=/home/jw/server
+ExecStart=/home/jw/server/pantry-server
+Restart=on-failure
+RestartSec=3s
+
+Environment=RUST_LOG=info
+Environment=SQLITE_DB_PATH=/home/jw/server/pantry.db
+Environment=GRAPHQL_PORT=4001
+# Single-user home server: trust anyone on the LAN with owner mode.
+# Pantry Host's frontend gates write actions on this server-side flag.
+Environment=PANTRY_TRUST_LAN=true
+
+# Small-RAM Pi 3 / Pi Zero W: serialize the image variant pipeline so a
+# burst of uploads can't OOM the box. Pure-Rust `image` crate doesn't
+# scale to multiple parallel encodes inside 512 MB; one at a time keeps
+# the box responsive. Bump for beefier devices.
+Environment=IMAGE_CONCURRENCY=1
+
+# AI features (recipe generation). Leave unset to disable. The Rust server's
+# Anthropic client reads either AI_API_KEY or ANTHROPIC_API_KEY.
+# Environment=AI_API_KEY=sk-ant-...
+
+[Install]
+WantedBy=multi-user.target

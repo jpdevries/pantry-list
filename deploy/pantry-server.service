@@ -19,6 +19,7 @@ RestartSec=3s
 
 Environment=RUST_LOG=info
 Environment=SQLITE_DB_PATH=/home/jw/server/pantry.db
+Environment=UPLOADS_DIR=/home/jw/server/uploads
 Environment=GRAPHQL_PORT=4001
 # Single-user home server: trust anyone on the LAN with owner mode.
 # Pantry Host's frontend gates write actions on this server-side flag.

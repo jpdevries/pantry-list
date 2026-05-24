@@ -282,8 +282,25 @@ pub fn start_connect(info: &TailscaleInfo, connect: &ConnectStateHandle, hostnam
     let connect = Arc::clone(connect);
 
     std::thread::spawn(move || {
+        // `--operator` lets the named local user run `tailscale` CLI commands
+        // (status, logout, set, etc.) without sudo. We default to the systemd
+        // unit's User= (`pi` on the Pi image) but honor TAILSCALE_OPERATOR so
+        // the image build can override per deployment.
+        let operator = std::env::var("TAILSCALE_OPERATOR")
+            .ok()
+            .or_else(|| std::env::var("USER").ok())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "pi".to_string());
+        let operator_arg = format!("--operator={operator}");
         let child = Command::new(&bin)
-            .args(["up", "--hostname", &hostname, "--timeout", "0s"])
+            .args([
+                "up",
+                "--hostname",
+                &hostname,
+                "--timeout",
+                "0s",
+                operator_arg.as_str(),
+            ])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn();

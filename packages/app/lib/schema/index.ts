@@ -910,7 +910,13 @@ builder.mutationField('generateRecipes', (t) =>
       const ingredients = await sql`SELECT * FROM ingredients ORDER BY name`;
       const cookware = await sql`SELECT * FROM cookware ORDER BY name`;
       const nameToId = Object.fromEntries((cookware as any[]).map((c) => [c.name, c.id]));
-      const generated = await aiGenerateRecipes(ingredients, cookware);
+      // SQLite stores tags as a JSON-encoded TEXT — parse before passing into
+      // claude.ts, which expects `tags: string[]`.
+      const cookwareForAi = (cookware as any[]).map((c) => ({
+        ...c,
+        tags: parseJsonArr(c.tags),
+      }));
+      const generated = await aiGenerateRecipes(ingredients, cookwareForAi);
       return Promise.all(
         generated.map((r) => {
           const requiredCookwareIds = (r.requiredCookware ?? [])

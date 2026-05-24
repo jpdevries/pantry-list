@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type { ProductMeta } from '@pantry-host/shared/product-meta';
 
@@ -35,38 +35,50 @@ export default function BarcodeScanner({ onScan, onError, cooldownMs = 2000 }: P
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [status, setStatus] = useState<'starting' | 'ready' | 'error'>('starting');
 
-  const handleBarcode = useCallback(
-    async (code: string) => {
+  // Pin callbacks + cooldown via refs so the camera-lifecycle effect can
+  // depend on []. Without this, parents passing inline onScan/onError (the
+  // common case) would re-create the camera on every render — and when
+  // start() fails synchronously (e.g. insecure HTTP context where
+  // navigator.mediaDevices is undefined) the resulting setState→re-render
+  // becomes an infinite loop and crashes React with #185.
+  const onScanRef = useRef(onScan);
+  const onErrorRef = useRef(onError);
+  const cooldownRef = useRef(cooldownMs);
+  useEffect(() => {
+    onScanRef.current = onScan;
+    onErrorRef.current = onError;
+    cooldownRef.current = cooldownMs;
+  });
+
+  useEffect(() => {
+    let stopped = false;
+    let animFrameId: number;
+
+    async function handleBarcode(code: string) {
       const now = Date.now();
       const last = lastScanned.current.get(code);
-      if (last && now - last < cooldownMs) return; // cooldown
+      if (last && now - last < cooldownRef.current) return; // cooldown
       lastScanned.current.set(code, now);
 
       try {
         const res = await fetch(`/api/lookup-barcode?code=${encodeURIComponent(code)}`);
         if (!res.ok) {
           const json = await res.json() as { error: string };
-          onError?.(`Product not found for barcode ${code}: ${json.error}`);
+          onErrorRef.current?.(`Product not found for barcode ${code}: ${json.error}`);
           return;
         }
         const product = await res.json() as { name: string; brand?: string; category?: string; quantity?: number; unit?: string; itemSize?: number; itemSizeUnit?: string; meta?: ProductMeta };
-        onScan({ barcode: code, ...product });
+        onScanRef.current({ barcode: code, ...product });
       } catch {
-        onError?.(`Failed to look up barcode ${code}`);
+        onErrorRef.current?.(`Failed to look up barcode ${code}`);
       }
-    },
-    [onScan, onError, cooldownMs],
-  );
-
-  useEffect(() => {
-    let stopped = false;
-    let animFrameId: number;
+    }
 
     async function start() {
       try {
         if (!navigator.mediaDevices?.getUserMedia) {
           setStatus('error');
-          onError?.('Camera access is not available. Please ensure you are using HTTPS and a supported browser.');
+          onErrorRef.current?.('Camera access is not available. Please ensure you are using HTTPS and a supported browser.');
           return;
         }
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -126,7 +138,7 @@ export default function BarcodeScanner({ onScan, onError, cooldownMs = 2000 }: P
         const msg = err instanceof Error ? err.message : 'Camera access denied';
         setCameraError(msg);
         setStatus('error');
-        onError?.(msg);
+        onErrorRef.current?.(msg);
       }
     }
 
@@ -138,7 +150,7 @@ export default function BarcodeScanner({ onScan, onError, cooldownMs = 2000 }: P
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     };
-  }, [handleBarcode, onError]);
+  }, []);
 
   if (cameraError) {
     return (

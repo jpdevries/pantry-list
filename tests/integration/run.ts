@@ -1,27 +1,49 @@
-import { spawn, execFile, type ChildProcess } from 'node:child_process';
-import { promisify } from 'node:util';
-import { writeFileSync, readFileSync, unlinkSync, readdirSync } from 'node:fs';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import {
+  writeFileSync,
+  unlinkSync,
+  readdirSync,
+  mkdtempSync,
+  rmSync,
+  existsSync,
+} from 'node:fs';
 import { createServer, type AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
 import { run } from 'node:test';
 import { spec } from 'node:test/reporters';
-import { Client } from 'pg';
 import { startMockServer, type MockServer } from './helpers/mock-server.ts';
 
 const HERE = import.meta.dirname;
 const REPO_ROOT = join(HERE, '..', '..');
 const APP_DIR = join(REPO_ROOT, 'packages', 'app');
-const SCHEMA_SQL = join(APP_DIR, 'schema.sql');
+const SERVER_DIR = join(REPO_ROOT, 'packages', 'server');
+// Workspace target dir lives at the repo root, not under packages/server.
+const SERVER_BIN = join(REPO_ROOT, 'target', 'debug', 'pantry-server');
 const HARNESS_FILE = join(HERE, '__harness__.json');
 
-const PG_IMAGE = 'postgres:16-alpine';
-const CONTAINER_NAME = 'pantry-host-integration-pg';
-const PG_USER = 'test';
-const PG_PASSWORD = 'test';
-const PG_DB = 'test';
+// Docker mode: set INTEGRATION_SERVER_IMAGE=<tag> to run the suite against a
+// pre-built container image instead of the native binary. INTEGRATION_SERVER_PLATFORM
+// optionally pins the docker platform (e.g. linux/arm/v7) so foreign-arch
+// images run under QEMU. Used by packages/server/scripts/build-pi.sh.
+const SERVER_IMAGE = process.env.INTEGRATION_SERVER_IMAGE ?? '';
+const SERVER_PLATFORM = process.env.INTEGRATION_SERVER_PLATFORM ?? '';
+const DOCKER_MODE = SERVER_IMAGE.length > 0;
 
-const exec = promisify(execFile);
+function buildRustServer(): void {
+  console.log('[harness] Building Rust server (cargo build)…');
+  const r = spawnSync('cargo', ['build', '-p', 'pantry-server'], {
+    cwd: REPO_ROOT,
+    stdio: 'inherit',
+  });
+  if (r.status !== 0) {
+    throw new Error(`cargo build failed with code ${r.status}`);
+  }
+  if (!existsSync(SERVER_BIN)) {
+    throw new Error(`built but missing binary at ${SERVER_BIN}`);
+  }
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -39,62 +61,7 @@ async function getFreePort(): Promise<number> {
   });
 }
 
-async function dockerAvailable(): Promise<boolean> {
-  try {
-    await exec('docker', ['info']);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function startPostgres(): Promise<{ id: string; port: number; dbUrl: string }> {
-  // Best-effort: clean any leftover from a prior crashed run.
-  await exec('docker', ['rm', '-f', CONTAINER_NAME]).catch(() => {});
-
-  const { stdout: idOut } = await exec('docker', [
-    'run', '-d', '--rm',
-    '--name', CONTAINER_NAME,
-    '-e', `POSTGRES_USER=${PG_USER}`,
-    '-e', `POSTGRES_PASSWORD=${PG_PASSWORD}`,
-    '-e', `POSTGRES_DB=${PG_DB}`,
-    '-P',
-    PG_IMAGE,
-  ]);
-  const id = idOut.trim();
-
-  const { stdout: portOut } = await exec('docker', ['port', id, '5432']);
-  const portMatch = portOut.match(/:(\d+)/);
-  if (!portMatch) throw new Error(`Could not parse mapped Postgres port from: ${portOut}`);
-  const port = parseInt(portMatch[1], 10);
-  const dbUrl = `postgres://${PG_USER}:${PG_PASSWORD}@127.0.0.1:${port}/${PG_DB}`;
-
-  // Probe via the same path tests use — pg_isready inside the container
-  // returns ready before the host port-forward is fully wired, which yields
-  // ECONNRESET on the first real client connection.
-  const deadline = Date.now() + 30_000;
-  let lastErr: unknown;
-  while (Date.now() < deadline) {
-    const client = new Client({ connectionString: dbUrl });
-    try {
-      await client.connect();
-      await client.query('SELECT 1');
-      await client.end();
-      return { id, port, dbUrl };
-    } catch (err) {
-      lastErr = err;
-      await client.end().catch(() => {});
-      await sleep(250);
-    }
-  }
-  throw new Error(`Postgres did not become ready within 30s: ${(lastErr as Error)?.message}`);
-}
-
-async function stopPostgres(id: string): Promise<void> {
-  await exec('docker', ['stop', '-t', '0', id]).catch(() => {});
-}
-
-async function waitForServer(url: string, deadlineMs = 30_000): Promise<void> {
+async function waitForServer(url: string, deadlineMs = 10_000): Promise<void> {
   const start = Date.now();
   let lastErr: unknown;
   while (Date.now() - start < deadlineMs) {
@@ -120,41 +87,22 @@ async function waitForServer(url: string, deadlineMs = 30_000): Promise<void> {
 }
 
 interface Handle {
-  containerId: string;
+  dbDir: string;
   mock: MockServer;
-  child: ChildProcess;
+  child?: ChildProcess;       // native mode
+  containerId?: string;       // docker mode
 }
 
 async function setup(): Promise<Handle> {
-  if (!(await dockerAvailable())) {
-    console.error('\n✗ Could not reach Docker.');
-    console.error('  The integration test harness provisions a Postgres container via');
-    console.error('  the docker CLI. Start Docker Desktop (or `colima start`) and re-run:');
-    console.error('    npm run test:integration\n');
-    process.exit(1);
+  if (!DOCKER_MODE) {
+    buildRustServer();
+  } else {
+    console.log(`[harness] Docker mode: image=${SERVER_IMAGE} platform=${SERVER_PLATFORM || '(default)'}`);
   }
 
-  console.log(`\n[harness] Starting Postgres container (${PG_IMAGE})…`);
-  const { id: containerId, dbUrl } = await startPostgres();
-  console.log(`[harness] Postgres ready: ${dbUrl}`);
-
-  // schema.sql's subquery DEFAULTs on kitchen_id are rejected by modern
-  // Postgres. Every app INSERT supplies kitchen_id explicitly, so stripping
-  // the defaults at apply-time is safe.
-  console.log('[harness] Applying schema.sql…');
-  const sanitized = readFileSync(SCHEMA_SQL, 'utf8').replace(
-    /\s*DEFAULT\s*\(\s*SELECT[^)]*\)/gi,
-    '',
-  );
-  const client = new Client({ connectionString: dbUrl });
-  await client.connect();
-  try {
-    await client.query(sanitized);
-    // Quiets the NOTICE chatter the server's IF NOT EXISTS re-adds emit.
-    await client.query(`ALTER DATABASE "${PG_DB}" SET client_min_messages = warning`);
-  } finally {
-    await client.end();
-  }
+  const dbDir = mkdtempSync(join(tmpdir(), 'pantry-host-integration-'));
+  const dbPath = join(dbDir, 'pantry.db');
+  console.log(`\n[harness] SQLite database: ${dbPath}`);
 
   console.log('[harness] Starting mock HTTP server…');
   const mock = await startMockServer();
@@ -162,40 +110,36 @@ async function setup(): Promise<Handle> {
 
   const port = await getFreePort();
   const url = `http://127.0.0.1:${port}`;
-  console.log(`[harness] Spawning GraphQL server on :${port}…`);
-  const child = spawn('npx', ['tsx', 'graphql-server.ts'], {
-    cwd: APP_DIR,
-    env: {
-      ...process.env,
-      DATABASE_URL: dbUrl,
-      GRAPHQL_PORT: String(port),
-      ANTHROPIC_BASE_URL: mock.url,
-      AI_API_KEY: 'test-key-anthropic-mock',
-      ENABLE_IMAGE_PROCESSING: 'false',
-      NODE_ENV: 'test',
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  const prefix = (chunk: Buffer) => {
-    for (const line of chunk.toString().split('\n')) {
-      if (line.trim()) process.stderr.write(`[server] ${line}\n`);
-    }
-  };
-  child.stdout?.on('data', prefix);
-  child.stderr?.on('data', prefix);
-  child.on('exit', (code, signal) => {
-    // 143 = SIGTERM (expected on teardown).
-    if (code != null && code !== 0 && code !== 143) {
-      console.error(`[harness] Server exited unexpectedly (code=${code}, signal=${signal})`);
-    }
-  });
+  const uploadsDir = join(APP_DIR, 'public', 'uploads');
+
+  const handle: Handle = { dbDir, mock };
+
+  // In docker mode the mock URL embedded in test request bodies has to be
+  // reachable *from inside the container* — 127.0.0.1 there is the container's
+  // own loopback. Tests that embed mockUrl in /fetch-recipe payloads need this
+  // rewritten to host.docker.internal so the container's reqwest client can
+  // resolve it. Host-side fetches against the server still go to the mapped
+  // 127.0.0.1:${port}, which is `url`.
+  const mockPort = new URL(mock.url).port;
+  const serverFacingMockUrl = DOCKER_MODE
+    ? `http://host.docker.internal:${mockPort}`
+    : mock.url;
 
   try {
-    await waitForServer(url);
+    if (DOCKER_MODE) {
+      handle.containerId = await spawnContainer({
+        port,
+        dbDir,
+        uploadsDir,
+        mockUrl: serverFacingMockUrl,
+      });
+    } else {
+      handle.child = spawnNativeServer({ port, dbPath, uploadsDir, mockUrl: mock.url, dbDir });
+    }
+    // Foreign-arch containers under QEMU need a longer ready window; native is fast.
+    await waitForServer(url, DOCKER_MODE ? 60_000 : 10_000);
   } catch (err) {
-    child.kill('SIGTERM');
-    await mock.stop().catch(() => {});
-    await stopPostgres(containerId);
+    await teardown(handle).catch(() => {});
     throw err;
   }
   console.log('[harness] Server ready.\n');
@@ -205,33 +149,136 @@ async function setup(): Promise<Handle> {
     JSON.stringify(
       {
         url,
-        dbUrl,
-        mockUrl: mock.url,
-        serverPid: child.pid,
-        containerId,
-        containerName: CONTAINER_NAME,
-        dbName: PG_DB,
-        dbUser: PG_USER,
+        dbPath,
+        mockUrl: serverFacingMockUrl,
+        serverPid: handle.child?.pid,
+        containerId: handle.containerId,
       },
       null,
       2,
     ),
   );
 
-  return { containerId, mock, child };
+  return handle;
+}
+
+function spawnNativeServer(opts: {
+  port: number;
+  dbPath: string;
+  uploadsDir: string;
+  mockUrl: string;
+  dbDir: string;
+}): ChildProcess {
+  console.log(`[harness] Spawning Rust GraphQL server on :${opts.port}…`);
+  // The Rust server writes uploads relative to its cwd (default
+  // `../app/public/uploads`), so run it from packages/server to match.
+  const child = spawn(SERVER_BIN, [], {
+    cwd: SERVER_DIR,
+    env: {
+      ...process.env,
+      SQLITE_DB_PATH: opts.dbPath,
+      GRAPHQL_PORT: String(opts.port),
+      ANTHROPIC_BASE_URL: opts.mockUrl,
+      AI_API_KEY: 'test-key-anthropic-mock',
+      ENABLE_IMAGE_PROCESSING: 'false',
+      UPLOADS_DIR: opts.uploadsDir,
+      RUST_LOG: process.env.RUST_LOG ?? 'warn',
+      // /api/* routes added in the SPA-embed port. Deterministic test
+      // values for the keys settings-read masks; isolated paths for the
+      // overrides + cache so each run starts clean.
+      RECIPE_API_KEY: 'rapi_test_secret_12345_long_enough_to_mask',
+      PIXABAY_API_KEY: 'pixabay_test_secret_67890_long_enough',
+      OVERRIDES_PATH: join(opts.dbDir, '.settings-overrides.json'),
+      CACHE_DIR: join(opts.dbDir, '.cache'),
+      OFF_BASE_URL: opts.mockUrl,
+      WIKIBOOKS_BASE_URL: opts.mockUrl,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  pipeChildLogs(child);
+  child.on('exit', (code, signal) => {
+    if (code != null && code !== 0 && code !== 143) {
+      console.error(`[harness] Server exited unexpectedly (code=${code}, signal=${signal})`);
+    }
+  });
+  return child;
+}
+
+async function spawnContainer(opts: {
+  port: number;
+  dbDir: string;
+  uploadsDir: string;
+  mockUrl: string;
+}): Promise<string> {
+  // `--add-host host.docker.internal:host-gateway` makes the host reachable
+  // from inside the container on both Docker Desktop (where the name
+  // pre-exists) and Linux native Docker (where it doesn't).
+  const args: string[] = ['run', '-d', '--rm'];
+  if (SERVER_PLATFORM) args.push('--platform', SERVER_PLATFORM);
+  args.push(
+    '--add-host', 'host.docker.internal:host-gateway',
+    '-p', `127.0.0.1:${opts.port}:4001`,
+    '-v', `${opts.dbDir}:/data`,
+    '-v', `${opts.uploadsDir}:/uploads`,
+    '-e', 'SQLITE_DB_PATH=/data/pantry.db',
+    '-e', 'GRAPHQL_PORT=4001',
+    '-e', 'UPLOADS_DIR=/uploads',
+    '-e', `ANTHROPIC_BASE_URL=${opts.mockUrl}`,
+    '-e', 'AI_API_KEY=test-key-anthropic-mock',
+    '-e', 'ENABLE_IMAGE_PROCESSING=false',
+    '-e', `RUST_LOG=${process.env.RUST_LOG ?? 'warn'}`,
+    // /api/* route env (mirror spawnNativeServer). OVERRIDES_PATH +
+    // CACHE_DIR live under /data so they share the bind-mount lifetime.
+    '-e', 'RECIPE_API_KEY=rapi_test_secret_12345_long_enough_to_mask',
+    '-e', 'PIXABAY_API_KEY=pixabay_test_secret_67890_long_enough',
+    '-e', 'OVERRIDES_PATH=/data/.settings-overrides.json',
+    '-e', 'CACHE_DIR=/data/.cache',
+    '-e', `OFF_BASE_URL=${opts.mockUrl}`,
+    '-e', `WIKIBOOKS_BASE_URL=${opts.mockUrl}`,
+    SERVER_IMAGE,
+  );
+
+  console.log(`[harness] docker ${args.join(' ')}`);
+  const r = spawnSync('docker', args, { encoding: 'utf8' });
+  if (r.status !== 0) {
+    throw new Error(`docker run failed (${r.status}): ${r.stderr || r.stdout}`);
+  }
+  const containerId = r.stdout.trim();
+  console.log(`[harness] Container started: ${containerId.slice(0, 12)}`);
+
+  // Stream container logs to stderr with a [server] prefix so failures are debuggable.
+  const logTail = spawn('docker', ['logs', '-f', containerId], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  pipeChildLogs(logTail);
+
+  return containerId;
+}
+
+function pipeChildLogs(child: ChildProcess): void {
+  const prefix = (chunk: Buffer) => {
+    for (const line of chunk.toString().split('\n')) {
+      if (line.trim()) process.stderr.write(`[server] ${line}\n`);
+    }
+  };
+  child.stdout?.on('data', prefix);
+  child.stderr?.on('data', prefix);
 }
 
 async function teardown(h: Handle): Promise<void> {
+  if (h.containerId) {
+    spawnSync('docker', ['kill', h.containerId], { stdio: 'ignore' });
+  }
   if (h.child && !h.child.killed) {
     h.child.kill('SIGTERM');
     await sleep(300);
     if (!h.child.killed) h.child.kill('SIGKILL');
   }
   await h.mock.stop().catch((err) => console.error('[harness] mock stop failed:', err));
-  await stopPostgres(h.containerId);
   try {
     unlinkSync(HARNESS_FILE);
   } catch { /* gone already */ }
+  rmSync(h.dbDir, { recursive: true, force: true });
 }
 
 function discoverTestFiles(): string[] {

@@ -1,0 +1,19 @@
+# Cargo workspace root.
+#
+# The only Rust crate in the monorepo is packages/server; the workspace exists
+# so `cross` mounts the repo root into its build container, which is what makes
+# `include_str!("../../shared/src/sql/schema.sql")` in packages/server/src/db.rs
+# resolve inside the container. Native cargo builds work either way.
+
+[workspace]
+resolver = "2"
+members = ["packages/server"]
+
+# Release profile — must live at the workspace root in a cargo workspace.
+# Tuned for size: this binary ships to Pi 3-class devices.
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"

@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { gql } from '@/lib/gql';
 import GenerateButton from '@/components/GenerateButton';
 import RecipeCard from '@/components/RecipeCard';
+import WelcomeBanner from '@/components/WelcomeBanner';
 import { getDailyQuote } from '@pantry-host/shared/dailyQuote';
 import { Carrot, BookOpen, Coffee, Package, Leaf, Tag, Wine, ForkKnife, CookingPot, Flask, Heart } from '@phosphor-icons/react';
 import { isTrustedNetwork } from '@/lib/isTrustedNetwork';
@@ -112,6 +113,8 @@ export default function HomePage() {
       </Head>
 
       <main id="stage" className="min-h-screen px-4 py-10 md:px-8 max-w-4xl mx-auto">
+        <WelcomeBanner />
+
         {/* Quote (desktop only — mobile shows in nav) */}
         {quote && (
           <blockquote className="hidden sm:block mb-12 text-2xl italic text-[var(--color-text-secondary)] font-serif pretty text-center">

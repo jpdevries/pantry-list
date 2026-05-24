@@ -13,11 +13,13 @@ Pantry Host is a privacy-first kitchen companion for managing recipes, pantry in
 ```
 pantry-host/
 ├── packages/
-│   ├── app/          # Self-hosted Rex app (Postgres, SSR)
+│   ├── app/          # Self-hosted Rex app (SQLite, SSR)
 │   ├── shared/       # Shared types, adapters, constants, theme, components
 │   ├── marketing/    # Static landing page (Vite, Cloudflare Pages)
 │   ├── web/          # Browser-native PWA (@sqlite.org/sqlite-wasm + OPFS, Vite)
-│   └── mcp/          # MCP server (Model Context Protocol for AI integrations)
+│   ├── mcp/          # MCP server (Model Context Protocol for AI integrations)
+│   ├── server/       # Rust GraphQL backend (IoT-targeted, axum + async-graphql + rusqlite)
+│   └── installer-ui/ # First-boot setup wizard (Vite + React, served by packages/server)
 ├── package.json      # npm workspaces root
 ├── .env.local        # App env vars (SQLITE_DB_PATH, AI_PROVIDER, AI_API_KEY)
 ├── .claude/          # Launch configs, settings
@@ -29,13 +31,14 @@ pantry-host/
 Root `package.json` has `"workspaces": ["packages/*"]`. Run workspace scripts via:
 ```bash
 npm run dev                    # packages/app (Rex @ 3000)
-npm run dev:graphql            # packages/app GraphQL (4001)
+npm run dev:graphql            # packages/app GraphQL (4001, Node + node:sqlite)
+npm run dev:graphql-rs         # packages/server (Rust GraphQL @ 4001, drop-in replacement for dev:graphql)
 npm run dev:marketing          # packages/marketing (Vite @ 5173)
 npm run dev:web                # packages/web (Vite @ 5174)
 npm run dev:mcp                # packages/mcp (MCP server, stdio)
 ```
 
-Or use `.claude/launch.json` configs: `pantry-host`, `graphql-server`, `marketing`, `web`, `mcp-server`.
+Or use `.claude/launch.json` configs: `pantry-host`, `graphql-server`, `graphql-server-rs`, `marketing`, `web`, `mcp-server`.
 
 ## packages/app — Self-hosted (Rex + SQLite)
 
@@ -259,6 +262,70 @@ packages/mcp/
 - `@modelcontextprotocol/sdk` — MCP TypeScript SDK
 - `zod` — Input schema validation (required by MCP SDK)
 - Requires the GraphQL server to be running on port 4001
+
+## packages/server — Rust GraphQL backend
+
+IoT-targeted Rust rewrite of `packages/app/graphql-server.ts`. Drop-in replacement for the GraphQL endpoint that the React app, web PWA, and MCP server talk to. ~3 MB stripped release binary, built for Pi 3-class devices.
+
+### Stack
+- **axum 0.8** + **async-graphql 7** — HTTP + GraphQL execution
+- **rusqlite 0.31 + r2d2** — bundled SQLite C library, small connection pool
+- **tokio** — async runtime; resolvers offload DB calls via `spawn_blocking`
+- **reqwest (rustls)** — shared HTTP client for `/fetch-recipe` + Anthropic
+- **image** (pure-Rust, with WebP via `image-webp`) — variant pipeline
+
+### Scope
+
+At feature parity with `packages/app/graphql-server.ts`:
+- Queries: `kitchens`, `kitchen`, `ingredients`, `recipes`, `recipe`, `cookware`, `cookwareItem`, `menus`, `menu`
+- Mutations: ingredient/cookware/kitchen/menu CRUD, `createRecipe`, `updateRecipe`, `deleteRecipe`, `completeRecipe`, `toggleRecipeQueued`, `toggleRecipeInMenu`, `addIngredients` (bulk), `generateRecipes` (via Anthropic Messages API — requires `AI_API_KEY`)
+- `POST /upload` — multipart upload, UUID rename, background variant pipeline (3 widths × {WebP, JPEG q80, grayscale JPEG q80}, 16:9 center-crop, GIFs preserved). Concurrent uploads serialized by a tokio Semaphore (`IMAGE_CONCURRENCY=1` default for Pi 3 RAM safety).
+- `POST /fetch-recipe` — JSON-LD → schema.org microdata → heuristic HTML, plus cookware substring detection against the cookware table.
+
+Friendly `{slug}.jpg` copy after `createRecipe`/`updateRecipe` for ICS calendar exports — same retry-loop semantics as the TS version.
+
+### File structure
+```
+packages/server/
+├── Cargo.toml                # opt-level=z, LTO, panic=abort for minimum binary size
+├── src/
+│   ├── main.rs               # axum server, AppState, CORS, graceful shutdown
+│   ├── config.rs             # ServerConfig (uploads dir, AI key, image semaphore)
+│   ├── db.rs                 # rusqlite pool, schema apply, ID + timestamp helpers
+│   ├── error.rs              # AppError stub for contextual errors (reserved)
+│   ├── models.rs             # rusqlite Row → struct conversions per table
+│   ├── image.rs              # variant pipeline + friendly-slug copy
+│   ├── scrape.rs             # JSON-LD + microdata + heuristic recipe extractors
+│   ├── ingredient_parse.rs   # qty + unit line parser (parseIngredientLine port)
+│   ├── iso_duration.rs       # PT30M → 30 minutes
+│   ├── anthropic.rs          # Messages API client for generateRecipes
+│   ├── routes/
+│   │   ├── upload.rs         # POST /upload — multipart + variant kickoff
+│   │   └── fetch_recipe.rs   # POST /fetch-recipe — fetch + extract + cookware
+│   └── graphql/
+│       ├── mod.rs            # MergedObject Query/Mutation roots
+│       ├── sql_helpers.rs    # kitchen lookup, unique_slug, sub-recipe linking
+│       ├── kitchen.rs        # Kitchen type + queries + mutations
+│       ├── ingredient.rs     # Ingredient + queries + mutations
+│       ├── recipe.rs         # Recipe + RecipeIngredient + queries + mutations
+│       ├── cookware.rs       # Cookware + queries + mutations
+│       └── menu.rs           # Menu + MenuRecipe + queries + mutations
+└── README.md
+```
+
+### Run
+
+```bash
+npm run dev:graphql-rs                                 # from repo root
+# or: cd packages/server && SQLITE_DB_PATH=../app/pantry.db cargo run
+# or: npm run build:graphql-rs (release)
+```
+
+Configurable via `SQLITE_DB_PATH` (default `./pantry.db`), `GRAPHQL_PORT` (default `4001`), and `RUST_LOG` (default `info`).
+
+### Schema source of truth
+
+The SQLite DDL lives in `packages/shared/src/sql/schema.sql` (canonical SQL) and is `include_str!`'d into the Rust binary at compile time. `packages/shared/src/sql/schema.ts` ships the same SQL embedded as a TS string for the Node and browser SQLite consumers. **Both files must be kept in sync** — they're side-by-side specifically so changes show up in the same diff. If you edit one, edit the other.
 
 ## packages/feed — Firehose indexer (Fly.io)
 

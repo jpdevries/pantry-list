@@ -47,6 +47,13 @@ export default function App({ Component, pageProps }: AppProps) {
 
     if ('serviceWorker' in navigator) {
       const buildHash = document.querySelector<HTMLMetaElement>('meta[name="build-hash"]')?.content || 'dev';
+      // Snapshot whether the page was already SW-controlled when we
+      // loaded. Used below to distinguish a "first install" (no prior
+      // controller — the page is already fresh, no reload needed) from
+      // a real "new build claimed us" event (had a prior controller —
+      // reload to pick up new HTML + JS bundles).
+      const wasControlled = !!navigator.serviceWorker.controller;
+
       // `updateViaCache: 'none'` bypasses the browser HTTP cache when
       // checking for SW updates — so a newly-deployed sw.js is always
       // fetched fresh rather than served from the HTTP cache. Without
@@ -62,7 +69,7 @@ export default function App({ Component, pageProps }: AppProps) {
       // On homescreen PWAs there's no reload button, so this is the only
       // way to escape stale assets without the user force-quitting the app.
       navigator.serviceWorker.addEventListener('message', (event) => {
-        if (event.data?.type === 'SW_UPDATED') {
+        if (event.data?.type === 'SW_UPDATED' && wasControlled) {
           window.location.reload();
         }
       });

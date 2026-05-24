@@ -1,0 +1,70 @@
+@import "tailwindcss";
+
+@source "../src";
+@source "../../shared/src";
+
+@theme {
+  --font-sans: -apple-system, BlinkMacSystemFont, avenir next, avenir, segoe ui, helvetica neue, Adwaita Sans, Cantarell, Ubuntu, roboto, noto, helvetica, arial, sans-serif;
+  --font-serif: Iowan Old Style, Apple Garamond, Baskerville, Times New Roman, Droid Serif, Times, Source Serif Pro, serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol;
+}
+
+@custom-variant dark {
+  body[data-color-scheme="dark"] & {
+  }
+  @media (prefers-color-scheme: dark) {
+    body:not([data-color-scheme="light"]) & {
+    }
+  }
+}
+
+@layer base {
+  :root {
+    color-scheme: light dark;
+    --color-bg-body: #f4f4f5;
+    --color-bg-card: #ffffff;
+    --color-border-card: #e4e4e7;
+    --color-text-primary: #09090b;
+    --color-text-secondary: #52525b;
+    --color-accent: #18181b;
+    --color-accent-hover: #09090b;
+    --color-accent-subtle: #e4e4e7;
+    --color-ring-focus: #18181b;
+  }
+  body[data-color-scheme="dark"], body:not([data-color-scheme="light"]) {
+    @media (prefers-color-scheme: dark) {
+      --color-bg-body: #09090b;
+      --color-bg-card: #18181b;
+      --color-border-card: #27272a;
+      --color-text-primary: #fafafa;
+      --color-text-secondary: #a1a1aa;
+      --color-accent: #fafafa;
+      --color-accent-hover: #ffffff;
+      --color-accent-subtle: #27272a;
+      --color-ring-focus: #fafafa;
+    }
+  }
+  body { background-color: var(--color-bg-body); color: var(--color-text-primary); font-family: var(--font-sans); }
+}
+
+.btn-primary {
+  background-color: var(--color-accent);
+  color: var(--color-bg-card);
+  border-radius: 0.5rem;
+  padding: 0.625rem 1.25rem;
+  font-weight: 600;
+  transition: background-color 120ms;
+}
+.btn-primary:hover { background-color: var(--color-accent-hover); }
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-secondary {
+  background-color: transparent;
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border-card);
+  border-radius: 0.5rem;
+  padding: 0.625rem 1.25rem;
+  font-weight: 500;
+  transition: background-color 120ms;
+}
+.btn-secondary:hover { background-color: var(--color-accent-subtle); color: var(--color-text-primary); }
+.btn-secondary:disabled { opacity: 0.4; cursor: not-allowed; }

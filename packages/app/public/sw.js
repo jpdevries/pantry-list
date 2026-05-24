@@ -77,12 +77,22 @@ function fetchWithTimeout(request) {
 
 self.addEventListener('install', (event) => {
   // Pre-cache shell pages into the new versioned build cache.
-  // Individual add() calls so one failure doesn't abort the install.
+  // Individual fetch+put so we can reject redirected responses — when
+  // first-boot setup is incomplete, the server redirects every shell
+  // path (/, /recipes, …) to /setup, and caching that redirect chain
+  // poisons the SW for the rest of the day. Falling back to a plain
+  // failed-fetch on redirect is safer: the cache stays empty for that
+  // path and the next online navigation re-tries.
   event.waitUntil(
     caches.open(BUILD_CACHE).then((cache) =>
       Promise.all(
         SHELL_PAGES.map((page) =>
-          cache.add(page).catch((err) => console.warn('[SW] Failed to pre-cache', page, err))
+          fetch(page, { redirect: 'follow' })
+            .then((res) => {
+              if (!res.ok || res.redirected) return;
+              return cache.put(page, res);
+            })
+            .catch((err) => console.warn('[SW] Failed to pre-cache', page, err))
         )
       )
     ).then(() => self.skipWaiting())
@@ -268,6 +278,23 @@ async function pixabayHandler(request) {
   }
 }
 
+/** True for any URL owned by the first-boot installer SPA + its supporting
+ *  endpoints. We deliberately leave the generic `/api/` namespace alone —
+ *  things like `/api/wikibooks` and `/api/plu` benefit from the SW's
+ *  caching, and only the installer-specific endpoints need pass-through. */
+function isInstallerPath(url) {
+  if (url.origin !== self.location.origin) return false;
+  const p = url.pathname;
+  return (
+    p === '/setup' ||
+    p.startsWith('/setup/') ||
+    p.startsWith('/_setup/') ||
+    p === '/api/setup-status' ||
+    p === '/api/setup-complete' ||
+    p.startsWith('/api/tailscale/')
+  );
+}
+
 // --- Fetch ---
 
 self.addEventListener('fetch', (event) => {
@@ -281,6 +308,14 @@ self.addEventListener('fetch', (event) => {
   // stale-while-revalidate handler at the bottom and throw. Let non-GETs
   // pass through to the network unconditionally.
   if (request.method !== 'GET') return;
+
+  // Installer-owned paths: pass straight through to the network. The SW is
+  // scoped to the whole origin (sw.js lives at `/sw.js`), so by default it
+  // would intercept first-boot installer navigations and serve stale cached
+  // shells from before setup was reset. Skipping these paths leaves the
+  // installer to talk to the server directly while the SW keeps doing its
+  // job for the main app.
+  if (isInstallerPath(url)) return;
 
   // Federated recipe sources (Cooklang + recipe-api.com): dedicated TTL cache.
   if (isCachedRecipeSource(url)) {

@@ -1,28 +1,21 @@
-/**
- * Canonical SQLite schema for pantry-host.
- *
- * Single source of truth — used by:
- *   - packages/app/graphql-server.ts (Node, node:sqlite, file-backed)
- *   - packages/web/lib/db.ts          (browser, @sqlite.org/sqlite-wasm, OPFS)
- *   - packages/server/src/db.rs       (Rust, rusqlite, include_str!) [planned]
- *
- * The Rust binary can't import a `.ts` file at compile time, so a sibling
- * **`schema.sql`** lives next to this file with the exact same DDL. Both
- * files must be kept in lock-step when the schema changes. If you edit one,
- * edit the other.
- *
- * Conventions:
- *   - IDs are TEXT (UUIDs); callers supply `crypto.randomUUID()` on insert.
- *   - Timestamps are TEXT (ISO 8601), defaulted with CURRENT_TIMESTAMP.
- *   - Tag/alias/photo array columns are TEXT containing JSON (default '[]').
- *   - product_meta is TEXT containing JSON.
- *   - Booleans are INTEGER 0/1.
- *   - Decimals are REAL.
- *
- * Run with `db.exec(SCHEMA_SQL)` at startup — every statement is wrapped in
- * `IF NOT EXISTS` so it's idempotent on existing databases.
- */
-export const SCHEMA_SQL = `
+-- Canonical SQLite schema for pantry-host.
+--
+-- Single source of truth. Loaded by:
+--   - packages/app/lib/db.ts                 (Node, node:sqlite, via shared/sql/schema.ts)
+--   - packages/web/lib/db.ts                 (browser, @sqlite.org/sqlite-wasm, via shared/sql/schema.ts)
+--   - packages/server/src/db.rs              (Rust, rusqlite, include_str!)
+--
+-- Conventions:
+--   - IDs are TEXT (UUIDs); callers supply `crypto.randomUUID()` on insert.
+--   - Timestamps are TEXT (ISO 8601), defaulted with strftime(...,'now').
+--   - Tag/alias/photo array columns are TEXT containing JSON (default '[]').
+--   - product_meta is TEXT containing JSON.
+--   - Booleans are INTEGER 0/1.
+--   - Decimals are REAL.
+--
+-- Every statement is wrapped in `IF NOT EXISTS` so it's idempotent on existing
+-- databases.
+
 CREATE TABLE IF NOT EXISTS kitchens (
   id          TEXT PRIMARY KEY,
   slug        TEXT NOT NULL UNIQUE,
@@ -134,4 +127,3 @@ CREATE TABLE IF NOT EXISTS menu_recipes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_menu_recipes_menu ON menu_recipes(menu_id);
-`;

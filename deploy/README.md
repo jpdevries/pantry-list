@@ -12,19 +12,68 @@ build. They live here rather than in `packages/server/scripts/`
 (Austin's location for the upstream template) because they encode
 machine-specific values that wouldn't generalize.
 
-## How to install on a Pi after the Rust build lands
+## How to install on a Pi (verified flow)
+
+Verified end-to-end 2026-05-23 against a Pi Zero W (BCM2835 ARMv6, 512 MB):
 
 ```bash
-# On your Mac, after `npm run build:pi armv6`:
-scp packages/server/dist/pi/armv6/pantry-server jw@pantry.local:~/server/
+# 1. On your Mac, cross-compile the Rust binary.
+#    Apple Silicon needs the workarounds documented in
+#    .claude/projects/.../memory/project_rust_rewrite.md
+#    (rustup --force-non-host + DOCKER_DEFAULT_PLATFORM=linux/amd64)
+rustup toolchain add stable-x86_64-unknown-linux-gnu --profile minimal --force-non-host
+DOCKER_DEFAULT_PLATFORM=linux/amd64 npm run build:pi armv6 -- --skip-frontend --no-image --no-verify
+# Produces packages/server/dist/pi/pantry-server-armv6 (~5.8 MB)
+
+# 2. scp to Pi:
+scp packages/server/dist/pi/pantry-server-armv6 jw@pantry.local:~/server/pantry-server
 scp deploy/pantry-server.service jw@pantry.local:/tmp/
 
-# On the Pi:
+# 3. SSH in (let the prompt change to jw@pantry BEFORE typing the next commands —
+#    if you paste all of these at once the sudo commands get eaten by ssh's
+#    handshake):
+ssh jw@pantry.local
+
+# 4. Install the unit:
 sudo mv /tmp/pantry-server.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now pantry-server
 sudo systemctl status pantry-server
+
+# 5. From your Mac, verify it's serving:
+curl http://pantry.local:4001/graphql \
+  -H 'content-type: application/json' \
+  -d '{"query":"{ kitchens { slug name } }"}'
 ```
 
-If you're not running as `jw`, edit the User/Group/WorkingDirectory/
-SQLITE_DB_PATH lines first.
+If you're not running as `jw`, edit the `User`, `Group`, `WorkingDirectory`,
+`SQLITE_DB_PATH`, and `UPLOADS_DIR` lines first.
+
+## Verified runtime characteristics on Pi Zero W
+
+| Metric | Value |
+|---|---|
+| Binary size | 5.8 MB (release, stripped, `panic="abort"`, `lto="fat"`, `opt-level="z"`) |
+| RSS at rest | **7.7 MB** (vs ~80–150 MB typical Node graphql-server) |
+| VSZ | 26 MB |
+| Cold-boot to "GraphQL API ready" | ~1.5 s |
+| Cold first GraphQL query (with WiFi RTT) | ~250 ms |
+| Warm GraphQL query (210 recipes, network RTT included) | **96 ms** end-to-end |
+| Pi free RAM after service is up | unchanged from idle (~250 Mi available) |
+
+That's the technical case for the Rust port on small-RAM devices: an
+order-of-magnitude smaller memory footprint than the Node graphql-server,
+similar query latency once warm.
+
+## Pointing the service at existing data
+
+The unit defaults `SQLITE_DB_PATH=/home/jw/server/pantry.db`. On first
+boot pantry-server auto-creates that file with just the schema +
+auto-inserted `home` kitchen. To run against a migrated PG snapshot
+(or a backed-up DB):
+
+```bash
+sudo systemctl stop pantry-server
+cp ~/snapshot-fallback.db ~/server/pantry.db
+sudo systemctl start pantry-server
+```

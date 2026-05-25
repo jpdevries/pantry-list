@@ -1,0 +1,8 @@
+# Local secrets — WiFi credentials, optional tailscale auth key, hostname.
+# A captive-portal flow will eventually replace .env.image; until then,
+# keep it off git.
+.env.image
+
+# Build outputs and the downloaded Pi OS image cache.
+dist/
+work/

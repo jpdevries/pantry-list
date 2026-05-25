@@ -1,0 +1,28 @@
+[Unit]
+Description=Pantry Host server (axum + GraphQL + Rex SPA)
+Documentation=https://github.com/austin-liminal/pantry-host
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/server
+ExecStart=/home/pi/server/pantry-server
+Restart=on-failure
+RestartSec=3s
+
+Environment=RUST_LOG=info
+Environment=SQLITE_DB_PATH=/home/pi/server/pantry.db
+Environment=GRAPHQL_PORT=4001
+# Single-user home server: trust anyone on the LAN with owner mode.
+Environment=PANTRY_TRUST_LAN=true
+
+# Small-RAM Pi 3 / Pi Zero: serialize the image variant pipeline so a burst
+# of uploads can't OOM the box. Keep in sync with config.rs's default if
+# tuning this for a beefier device.
+Environment=IMAGE_CONCURRENCY=1
+
+[Install]
+WantedBy=multi-user.target

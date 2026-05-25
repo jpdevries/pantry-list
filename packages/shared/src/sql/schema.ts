@@ -4,7 +4,7 @@
  * Single source of truth — used by:
  *   - packages/app/graphql-server.ts (Node, node:sqlite, file-backed)
  *   - packages/web/lib/db.ts          (browser, @sqlite.org/sqlite-wasm, OPFS)
- *   - packages/server/src/db.rs       (Rust, rusqlite, include_str!) [planned]
+ *   - packages/server/src/db.rs       (Rust, rusqlite, include_str!)
  *
  * The Rust binary can't import a `.ts` file at compile time, so a sibling
  * **`schema.sql`** lives next to this file with the exact same DDL. Both

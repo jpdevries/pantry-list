@@ -1,0 +1,47 @@
+[package]
+name = "pantry-server"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT"
+description = "Rust GraphQL backend for Pantry Host (IoT-targeted phase-2 rewrite)"
+
+[[bin]]
+name = "pantry-server"
+path = "src/main.rs"
+
+[dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "multipart"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "fs", "sync"] }
+tower-http = { version = "0.6", features = ["cors"] }
+async-graphql = { version = "7", default-features = false, features = ["chrono"] }
+async-graphql-axum = "7"
+rusqlite = { version = "0.31", features = ["bundled", "uuid", "serde_json"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.24"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+anyhow = "1"
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Recipe URL scraping + Anthropic API client. rustls-tls avoids the system
+# OpenSSL dependency that complicates cross-compilation for Pi.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+# Recipe HTML/JSON-LD parsing. Pulled in for /fetch-recipe — matches the
+# regex-heavy approach the Node graphql-server uses.
+regex = "1"
+# Image variant generation for /upload. WebP encoding goes through the pure-Rust
+# image-webp crate (enabled by the `webp` feature), so no native libs are needed.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
+# Embed the Rex-built frontend (`packages/app/.rex/build/client/` + `public/`)
+# at compile time. Empty `static/` dir is fine — the binary just serves a
+# placeholder shell. `build-pi.sh` (or `scripts/sync-frontend.sh`) populates
+# the dir before `cargo build --release`.
+rust-embed = { version = "8", default-features = false, features = ["interpolate-folder-path", "include-exclude"] }
+mime_guess = "2"
+
+# [profile.release] lives at the workspace root (../../Cargo.toml). Cargo
+# ignores per-package profile blocks in a workspace.

@@ -54,6 +54,12 @@
       "runtimeExecutable": "sh",
       "runtimeArgs": ["-c", "export NVM_DIR=\"$HOME/.nvm\" && . \"$NVM_DIR/nvm.sh\" && nvm use && cd packages/app && set -a && source ../../.env.local && export SQLITE_DB_PATH=./pantry.db && set +a && npx tsx graphql-server.ts"],
       "port": 4001
+    },
+    {
+      "name": "graphql-server-rs",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "cd packages/server && set -a && [ -f ../../.env.local ] && source ../../.env.local; export SQLITE_DB_PATH=\"${SQLITE_DB_PATH:-../app/pantry.db}\" && set +a && cargo run"],
+      "port": 4001
     }
   ]
 }

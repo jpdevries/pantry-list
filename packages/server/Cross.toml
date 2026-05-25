@@ -1,0 +1,16 @@
+# Explicit image pins for cross-rs toolchain images. Cross would pick these up
+# from its defaults too, but pinning makes the build reproducible and lets us
+# bump everyone in lockstep.
+#
+# Both `:main` and `:0.2.5` are publicly pullable. If `docker pull` returns
+# "denied" for these images it's a docker-daemon auth issue (stale GHCR creds
+# in ~/.docker/config.json), not a cross config issue — see the README.
+
+[target.arm-unknown-linux-gnueabihf]
+image = ":0.2.5"
+
+[target.armv7-unknown-linux-gnueabihf]
+image = ":0.2.5"
+
+[target.aarch64-unknown-linux-gnu]
+image = ":0.2.5"

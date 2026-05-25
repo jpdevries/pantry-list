@@ -28,11 +28,24 @@ export function isTrustedNetwork(hostname: string): boolean {
 
 /**
  * Determines if the current user has owner-level access.
- * Owner = localhost (direct machine) or HTTPS (Tailscale cert, mkcert, etc.).
- * Guest = HTTP on a LAN IP (shareable link like http://192.168.x.x:3000).
+ *
+ * Always-owner: `localhost`, `127.0.0.1`, or HTTPS (Tailscale cert,
+ * mkcert, etc.).
+ *
+ * Opt-in: if the server emits `<meta name="trust-lan" content="true">`
+ * in the SPA shell, any hostname that `isTrustedNetwork()` recognizes
+ * (`.local` mDNS, `.ts.net` MagicDNS, RFC1918 LAN, Tailscale CGNAT)
+ * also counts as owner. The Rust binary emits that meta tag when its
+ * `PANTRY_TRUST_LAN=true` env var is set — the single-user-home-server
+ * posture for Pi deployments. Default is off so the Rex dev server
+ * exposed over LAN stays read-only for guests.
  */
 export function isOwner(): boolean {
   if (isServer) return false;
+  if (window.location.protocol === 'https:') return true;
   const h = window.location.hostname;
-  return h === 'localhost' || h === '127.0.0.1' || window.location.protocol === 'https:';
+  if (h === 'localhost' || h === '127.0.0.1') return true;
+  const meta = document.querySelector('meta[name="trust-lan"]');
+  if (meta?.getAttribute('content') === 'true' && isTrustedNetwork(h)) return true;
+  return false;
 }

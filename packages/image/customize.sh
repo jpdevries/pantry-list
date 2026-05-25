@@ -114,11 +114,24 @@ install -m 0644 "$SERVER_DIR/scripts/pantry-server.service" \
 mkdir -p "$MOUNT_ROOT/etc/systemd/system/pantry-server.service.d"
 cat > "$MOUNT_ROOT/etc/systemd/system/pantry-server.service.d/pi-image.conf" <<DROPIN
 [Service]
+# The base unit at packages/server/scripts/pantry-server.service hardcodes
+# User=pi, WorkingDirectory=/home/pi/server, and ExecStart=/home/pi/server/
+# pantry-server. When the .env.image picks a different USERNAME, every one
+# of those paths needs to follow — otherwise systemd fails CHDIR (and
+# can't even reach ExecStart) because /home/pi is jw-unreadable. The empty
+# ExecStart= before the new one is systemd's required incantation to
+# *replace* rather than append the command.
+User=$USERNAME
+WorkingDirectory=/home/$USERNAME/server
+ExecStart=
+ExecStart=/home/$USERNAME/server/pantry-server
+Environment=SQLITE_DB_PATH=/home/$USERNAME/server/pantry.db
+
 Environment=TAILSCALE_OPERATOR=$USERNAME
 # Bind the server to the standard HTTP port so users hit http://pantry.local
 # (no :4001 suffix) once the Pi is on the LAN. Granting
-# CAP_NET_BIND_SERVICE lets pantry-server (which runs as User=pi) bind to
-# privileged ports without running as root.
+# CAP_NET_BIND_SERVICE lets pantry-server bind to privileged ports without
+# running as root.
 Environment=GRAPHQL_PORT=80
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
@@ -400,11 +413,23 @@ else
   warn "regenerate_ssh_host_keys script not found — SSH keygen left at Pi OS default"
 fi
 
-# Make sure the prebaked user owns its home + server dir. The account was
-# created/finished in the chroot above (UID/GID 1000 — the Bookworm default
-# for the first regular user, `pi`), but the binary and server dir were
-# dropped in as root, so chown the tree to match.
-chown -R 1000:1000 "$MOUNT_ROOT/home/$USERNAME"
+# Make sure the prebaked user owns its home + server dir. The binary and
+# server dir were dropped in as root before the user was created (we needed
+# the path before useradd ran), so the tree is root-owned and the chown
+# can't go through the chroot anymore (qemu + /proc + /dev are unmounted
+# at this point). Look up whatever UID/GID `useradd` actually assigned by
+# reading the image's /etc/passwd, then chown by number from the host.
+#
+# Bookworm Lite ships `pi` already at UID 1000; when USERNAME != "pi" the
+# new account lands at 1001+. A hardcoded `1000:1000` here would give the
+# home (and .ssh) to `pi` instead, and sshd's StrictModes check would
+# refuse publickey auth for the actual user.
+USER_UID="$(awk -F: -v u="$USERNAME" '$1==u{print $3; exit}' "$MOUNT_ROOT/etc/passwd")"
+USER_GID="$(awk -F: -v u="$USERNAME" '$1==u{print $4; exit}' "$MOUNT_ROOT/etc/passwd")"
+[ -n "$USER_UID" ] && [ -n "$USER_GID" ] \
+  || die "couldn't find UID/GID for '$USERNAME' in $MOUNT_ROOT/etc/passwd"
+log "chowning /home/$USERNAME to $USER_UID:$USER_GID"
+chown -R "$USER_UID:$USER_GID" "$MOUNT_ROOT/home/$USERNAME"
 
 # Final sync + unmount happen in cleanup() via the EXIT trap.
 sync

@@ -26,6 +26,29 @@ use crate::auth::is_owner;
 use crate::tailscale::{enable_serve, read_status, start_connect, TailscaleState};
 use crate::AppState;
 
+/// Choose the hostname we register with the tailnet. Honors
+/// `PANTRY_HOSTNAME` (so a sysadmin can pin a name regardless of the
+/// system hostname), then falls back to `/etc/hostname` (always set on
+/// systemd), then to a sensible literal so the call never hands tailscaled
+/// an empty string. The bare literal `"pantry-host"` used to be hardcoded
+/// here, which made the image-builder's HOSTNAME=... setting cosmetic —
+/// every install registered as "pantry-host" regardless.
+fn registration_hostname() -> String {
+    if let Ok(v) = std::env::var("PANTRY_HOSTNAME") {
+        let v = v.trim();
+        if !v.is_empty() {
+            return v.to_string();
+        }
+    }
+    if let Ok(v) = std::fs::read_to_string("/etc/hostname") {
+        let v = v.trim();
+        if !v.is_empty() {
+            return v.to_string();
+        }
+    }
+    "pantry-host".to_string()
+}
+
 pub async fn status(State(state): State<Arc<AppState>>) -> Response {
     let s = compute_status(&state).await;
     json_response(StatusCode::OK, json!(s))
@@ -41,7 +64,7 @@ pub async fn connect(State(state): State<Arc<AppState>>, headers: HeaderMap) -> 
             json!({ "error": "tailscale binary not installed" }),
         );
     };
-    start_connect(&info, &state.tailscale_connect, "pantry-host");
+    start_connect(&info, &state.tailscale_connect, &registration_hostname());
     // Return the freshly-updated status so the SPA can short-circuit
     // its first poll. Most of the time it'll be `awaiting_auth` once the
     // URL appears (which can take up to ~1s); the SPA continues to poll

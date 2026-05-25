@@ -166,6 +166,38 @@ chroot "$MOUNT_ROOT" /bin/bash -c "systemctl enable tailscaled.service" || \
   ln -sf /lib/systemd/system/tailscaled.service \
     "$MOUNT_ROOT/etc/systemd/system/multi-user.target.wants/tailscaled.service"
 
+# tailscale-set-operator oneshot --------------------------------------------
+# tailscaled gates LocalAPI commands (`tailscale up`, `tailscale set`, etc.)
+# behind the per-tailnet `--operator` setting. Out of the box only root can
+# issue them, so the installer-UI's "Sign in with Tailscale" button — which
+# invokes `tailscale up` as \$USERNAME via the pantry-server — silently
+# no-ops with `checkprefs access denied`. Running `sudo tailscale set
+# --operator=\$USER` once fixes it, but the user shouldn't have to know
+# that. Bake a oneshot that runs it on first boot, gated by a sentinel so
+# it doesn't re-run on every boot (or fight a future operator change).
+cat > "$MOUNT_ROOT/etc/systemd/system/tailscale-set-operator.service" <<UNIT
+[Unit]
+Description=Set tailscale operator to $USERNAME (so installer can run tailscale up)
+After=tailscaled.service
+Requires=tailscaled.service
+ConditionPathExists=!/var/lib/tailscale-set-operator.done
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+# Small wait so tailscaled's LocalAPI socket is actually up. \`tailscale
+# set\` returns fast once tailscaled answers — no exponential backoff in
+# the CLI itself, so we give it a few seconds rather than racing it.
+ExecStartPre=/bin/sleep 3
+ExecStart=/usr/bin/tailscale set --operator=$USERNAME
+ExecStartPost=/bin/touch /var/lib/tailscale-set-operator.done
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+ln -sf /etc/systemd/system/tailscale-set-operator.service \
+  "$MOUNT_ROOT/etc/systemd/system/multi-user.target.wants/tailscale-set-operator.service"
+
 # User account (prebaked) ----------------------------------------------------
 # Bookworm Lite ships a UID-1000 `pi` user but parks it in a "needs first-boot
 # setup" state that triggers the interactive username/password dialog

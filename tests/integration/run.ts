@@ -43,6 +43,23 @@ function buildRustServer(): void {
   if (!existsSync(SERVER_BIN)) {
     throw new Error(`built but missing binary at ${SERVER_BIN}`);
   }
+
+  // rust-embed reads `static/client/` at runtime in dev profile, so the
+  // build above succeeds even when the folder only contains `.gitkeep`.
+  // With an empty embed the SPA serve path falls through to the bare
+  // placeholder HTML, and `frontend.test.ts` stalls node:test's run()
+  // stream waiting for shell-bearing pages that never materialize. Catch
+  // that ahead of time with a clear pointer at the build script.
+  const clientManifest = join(SERVER_DIR, 'static', 'client', 'manifest.json');
+  if (!existsSync(clientManifest)) {
+    throw new Error(
+      `[harness] packages/server/static/client/manifest.json is missing — the\n` +
+        `embedded Rex frontend isn't populated. Run:\n\n` +
+        `  packages/server/scripts/sync-frontend.sh --build\n\n` +
+        `then re-run the suite. (The Rex build output is gitignored, so this\n` +
+        `step is required after a fresh clone or whenever packages/app changes.)`,
+    );
+  }
 }
 
 function sleep(ms: number): Promise<void> {
@@ -84,6 +101,19 @@ async function waitForServer(url: string, deadlineMs = 10_000): Promise<void> {
     `GraphQL server did not become ready within ${deadlineMs}ms at ${url}` +
       (lastErr ? `\nLast error: ${(lastErr as Error).message}` : ''),
   );
+}
+
+/**
+ * Mark first-boot setup complete so the `route_by_setup` middleware
+ * stops 307-redirecting GETs to `/setup`. Without this, every frontend
+ * test that expects a 308 → `/` redirect (and every page-render
+ * assertion) fails because the installer wizard intercepts first.
+ */
+async function markSetupComplete(url: string): Promise<void> {
+  const r = await fetch(`${url}/api/setup-complete`, { method: 'POST' });
+  if (!r.ok) {
+    throw new Error(`POST /api/setup-complete failed: HTTP ${r.status}`);
+  }
 }
 
 interface Handle {
@@ -138,11 +168,12 @@ async function setup(): Promise<Handle> {
     }
     // Foreign-arch containers under QEMU need a longer ready window; native is fast.
     await waitForServer(url, DOCKER_MODE ? 60_000 : 10_000);
+    await markSetupComplete(url);
   } catch (err) {
     await teardown(handle).catch(() => {});
     throw err;
   }
-  console.log('[harness] Server ready.\n');
+  console.log('[harness] Server ready (setup marked complete).\n');
 
   writeFileSync(
     HARNESS_FILE,
